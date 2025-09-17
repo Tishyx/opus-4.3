@@ -237,11 +237,15 @@ function calculatePrecipitation(x: number, y: number, cloudWater: number[][], cl
 }
 
 // Step 4: Convective cloud development
-function calculateConvectiveClouds(x: number, y: number, hour: number, surfaceTemp: number, humidity: number[][]): {development: number, type: number, cape: number, thermalStrength: number} {
-    const baseTemp = calculateBaseTemperature(
-        parseInt((document.getElementById('month') as HTMLSelectElement).value),
-        hour
-    );
+function calculateConvectiveClouds(
+    x: number,
+    y: number,
+    month: number,
+    hour: number,
+    surfaceTemp: number,
+    humidity: number[][]
+): {development: number, type: number, cape: number, thermalStrength: number} {
+    const baseTemp = calculateBaseTemperature(month, hour);
     
     let thermal = 0;
     
@@ -259,7 +263,7 @@ function calculateConvectiveClouds(x: number, y: number, hour: number, surfaceTe
         }
     }
     
-    const CAPE = Math.max(0, thermal * state.humidity[y][x] * 100);
+    const CAPE = Math.max(0, thermal * humidity[y][x] * 100);
     
     let cloudDevelopment = 0;
     let cloudTypeResult = CLOUD_TYPES.NONE;
@@ -283,13 +287,13 @@ function calculateConvectiveClouds(x: number, y: number, hour: number, surfaceTe
 
 // Step 5: Cloud microphysics
 function calculateCloudMicrophysics(x: number, y: number, cloudWater: number[][], temperature: number[][], updraftSpeed: number): {ice: number, dropletSize: number, precipEfficiency: number, graupel: number} {
-    let iceContent = 0;
+    let iceContent = state.iceContent[y][x];
     let dropletSize = 5;
     let precipitationEfficiency = 0;
     
     if (state.temperature[y][x] < 0 && state.cloudWater[y][x] > 0) {
         const freezingRate = Math.exp(-state.temperature[y][x] / 10);
-        state.iceContent = state.cloudWater[y][x] * freezingRate;
+        iceContent = state.cloudWater[y][x] * freezingRate;
         state.cloudWater[y][x] *= (1 - freezingRate * 0.5);
     }
     
@@ -302,11 +306,11 @@ function calculateCloudMicrophysics(x: number, y: number, cloudWater: number[][]
     
     let graupelFormation = 0;
     if (state.temperature[y][x] > -10 && state.temperature[y][x] < 0 && updraftSpeed > 5) {
-        graupelFormation = state.iceContent * 0.3;
+        graupelFormation = iceContent * 0.3;
     }
-    
+
     return {
-        ice: state.iceContent,
+        ice: iceContent,
         dropletSize: dropletSize,
         precipEfficiency: precipitationEfficiency,
         graupel: graupelFormation
@@ -360,7 +364,7 @@ function updateHumidity(x: number, y: number, temperature: number[][], windSpeed
     state.dewPoint[y][x] = (b * gamma) / (a - gamma);
 }
 
-function updateCloudDynamics(hour: number, windSpeed: number, windDir: number, timeFactor: number): void {
+function updateCloudDynamics(month: number, hour: number, windSpeed: number, windDir: number, timeFactor: number): void {
     if (timeFactor <= 0) return;
 
     const sunAltitude = Math.max(0, Math.sin((hour - 6) * Math.PI / 12));
@@ -369,11 +373,18 @@ function updateCloudDynamics(hour: number, windSpeed: number, windDir: number, t
         for (let x = 0; x < GRID_SIZE; x++) {
             const orographicFormationRate = calculateOrographicClouds(x, y, windSpeed, windDir, state.humidity, state.temperature) * 2.0; // rate in water/hr
             
-            const convective = calculateConvectiveClouds(x, y, hour, state.temperature[y][x], state.humidity);
+            const convective = calculateConvectiveClouds(
+                x,
+                y,
+                month,
+                hour,
+                state.temperature[y][x],
+                state.humidity
+            );
             const convectiveFormationRate = convective.development * 2.0;
-            
+
             state.convectiveEnergy[y][x] = convective.cape;
-            state.thermalStrength[y][x] = convective.state.thermalStrength;
+            state.thermalStrength[y][x] = convective.thermalStrength;
             
             let cloudFormationRate = 0;
             if (orographicFormationRate > 0.5) {
@@ -1363,7 +1374,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     }
 
     if (enableClouds) {
-        updateCloudDynamics(currentHour, windSpeed, windDir, timeFactor);
+        updateCloudDynamics(month, currentHour, windSpeed, windDir, timeFactor);
     } else {
         state.cloudCoverage = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
         state.precipitation = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
