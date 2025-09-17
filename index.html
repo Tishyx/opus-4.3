@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microclimate Simulator</title>
+    <link rel="stylesheet" href="index.css">
+    <script type="importmap">
+    {
+      "imports": {
+        "react/": "https://esm.sh/react@^19.1.1/"
+      }
+    }
+    </script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div class="header">
+        <h1>🌍 Interactive Microclimate Simulator</h1>
+        <p style="color: #718096;">Design terrain and land cover, then simulate realistic temperature patterns</p>
+    </div>
+    
+    <div class="main-container">
+        <div class="canvas-container">
+            <canvas id="canvas"></canvas>
+            <div id="tooltip"></div>
+        </div>
+        
+        <div class="controls">
+            <div class="control-section">
+                <h3>▶️ Simulation Control</h3>
+                <div class="time-display">
+                    <span id="simDay">Day 1</span>, <span id="simTime">06:00</span>
+                </div>
+                <div class="control-group">
+                    <label>Simulation Speed: <span class="range-value" id="speedValue">1x</span></label>
+                    <input type="range" id="simSpeed" min="1" max="60" value="10" step="1">
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="createScenarioBtn">🏞️ Create Scenario</button>
+                    <button class="btn btn-secondary" id="playPauseBtn">▶️ Play</button>
+                    <button class="btn btn-secondary" id="resetBtn">🗑️ Reset</button>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>🎨 Editing Tools</h3>
+                <div class="control-group">
+                    <label>Brush Category</label>
+                    <select id="brushCategory" style="margin-bottom: 10px;">
+                        <option value="terrain">Terrain & Land Cover</option>
+                        <option value="soil">Soil Types</option>
+                    </select>
+                </div>
+                
+                <div class="control-group" id="terrainBrushes">
+                    <label>Land Cover Type</label>
+                    <div class="brush-buttons">
+                        <button class="brush-btn active" data-brush="terrain" data-category="terrain">⛰️ Terrain</button>
+                        <button class="brush-btn" data-brush="water" data-category="land">💧 Water</button>
+                        <button class="brush-btn" data-brush="forest" data-category="land">🌲 Forest</button>
+                        <button class="brush-btn" data-brush="urban" data-category="land">🏙️ Urban</button>
+                        <button class="brush-btn" data-brush="settlement" data-category="land">🏘️ Settlement</button>
+                        <button class="brush-btn" data-brush="grassland" data-category="land">🌾 Grassland</button>
+                        <button class="brush-btn" data-brush="manualPrecipitation" data-category="action">🌧️ Precipitation</button>
+                    </div>
+                </div>
+                
+                <div class="control-group" id="soilBrushes" style="display: none;">
+                    <label>Soil Type</label>
+                    <div class="brush-buttons">
+                        <button class="brush-btn" data-brush="loam" data-category="soil">🟫 Loam</button>
+                        <button class="brush-btn" data-brush="sand" data-category="soil">🟨 Sand</button>
+                        <button class="brush-btn" data-brush="clay" data-category="soil">🟤 Clay</button>
+                        <button class="brush-btn" data-brush="rock" data-category="soil">⬜ Rock</button>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <label>Brush Size: <span class="range-value" id="brushSizeValue">15</span></label>
+                    <input type="range" id="brushSize" min="5" max="50" value="15">
+                </div>
+                
+                <div class="control-group" id="terrainStrengthGroup">
+                    <label>Terrain Strength: <span class="range-value" id="terrainStrengthValue">5</span></label>
+                    <input type="range" id="terrainStrength" min="1" max="20" value="5">
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h3>🌡️ Climate Settings</h3>
+                <div class="control-group">
+                    <label>Month</label>
+                    <select id="month">
+                        <option value="1">January (Winter)</option>
+                        <option value="2">February (Winter)</option>
+                        <option value="3">March (Spring)</option>
+                        <option value="4">April (Spring)</option>
+                        <option value="5">May (Spring)</option>
+                        <option value="6">June (Summer)</option>
+                        <option value="7" selected>July (Summer)</option>
+                        <option value="8">August (Summer)</option>
+                        <option value="9">September (Fall)</option>
+                        <option value="10">October (Fall)</option>
+                        <option value="11">November (Fall)</option>
+                        <option value="12">December (Winter)</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>Wind Direction</label>
+                    <select id="windDirection">
+                        <option value="0" selected>North → South (↓)</option>
+                        <option value="45">Northeast → Southwest (↙)</option>
+                        <option value="90">East → West (←)</option>
+                        <option value="135">Southeast → Northwest (↖)</option>
+                        <option value="180">South → North (↑)</option>
+                        <option value="225">Southwest → Northeast (↗)</option>
+                        <option value="270">West → East (→)</option>
+                        <option value="315">Northwest → Southeast (↘)</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>Wind Speed: <span class="range-value" id="windSpeedValue">20</span> km/h</label>
+                    <input type="range" id="windSpeed" min="0" max="50" value="20">
+                </div>
+                
+                <div class="control-group">
+                    <label>Wind Gustiness: <span class="range-value" id="windGustinessValue">20</span>%</label>
+                    <input type="range" id="windGustiness" min="0" max="100" value="20">
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h3>📊 Visualization</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showHeatmap" checked>
+                    <label for="showHeatmap">Show Temperature Heatmap</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showSoilTypes">
+                    <label for="showSoilTypes">Show Soil Types</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showHillshade" checked>
+                    <label for="showHillshade">Show Terrain Hillshading</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="enableAdvection" checked>
+                    <label for="enableAdvection">Enable Advection (Wind Transport)</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="enableDiffusion" checked>
+                    <label for="enableDiffusion">Enable Heat Diffusion</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="enableInversions" checked>
+                    <label for="enableInversions">Enable Temperature Inversions</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="enableDownslope" checked>
+                    <label for="enableDownslope">Enable Downslope Winds</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showFog" checked>
+                    <label for="showFog">Show Fog/Inversion Layer</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showWindFlow">
+                    <label for="showWindFlow">Show Wind Flow Arrows</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="enableClouds" checked>
+                    <label for="enableClouds">Enable Cloud Dynamics</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showClouds" checked>
+                    <label for="showClouds">Show Cloud Cover</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showPrecipitation">
+                    <label for="showPrecipitation">Show Precipitation</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="showSnowCover" checked>
+                    <label for="showSnowCover">Show Snow Cover</label>
+                </div>
+                
+                <div class="stats" id="stats">
+                    <div class="stat-row">
+                        <span class="stat-label">Min Temperature:</span>
+                        <span class="stat-value" id="minTemp">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Max Temperature:</span>
+                        <span class="stat-value" id="maxTemp">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Avg Temperature:</span>
+                        <span class="stat-value" id="avgTemp">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Precipitation:</span>
+                        <span class="stat-value" id="totalPrecip">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Max Cloud Height:</span>
+                        <span class="stat-value" id="maxCloudHeight">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Avg. Snow Depth:</span>
+                        <span class="stat-value" id="avgSnowDepth">--</span>
+                    </div>
+                </div>
+                
+                <div class="stats" id="inversionInfo" style="display: none; margin-top: 10px; background: #e6f2ff;">
+                    <div class="stat-row">
+                        <span class="stat-label">Inversion Height:</span>
+                        <span class="stat-value" id="inversionHeight">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Inversion Strength:</span>
+                        <span class="stat-value" id="inversionStrength">--</span>
+                    </div>
+                    <div class="stat-row" style="margin-top: 5px; font-size: 12px; color: #5a6c7d;">
+                        <span>🌫️ Fog in valleys | ☀️ Warm belt on slopes</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h3>🗺️ Land Cover Legend</h3>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #4a9eff;"></div>
+                        <span>Water</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #2d5a2d;"></div>
+                        <span>Forest</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #8b8b8b;"></div>
+                        <span>Urban Center</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #a67c52;"></div>
+                        <span>Settlement</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #90b56a;"></div>
+                        <span>Grassland</span>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                    <strong style="font-size: 13px; color: #4a5568;">Soil Types:</strong>
+                    <div class="legend" style="margin-top: 8px;">
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #8B7355;"></div>
+                            <span style="font-size: 12px;">Loam (balanced)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #F4E4BC;"></div>
+                            <span style="font-size: 12px;">Sand (hot/cold)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #A0522D;"></div>
+                            <span style="font-size: 12px;">Clay (stable)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #696969;"></div>
+                            <span style="font-size: 12px;">Rock (thermal mass)</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                    <strong style="font-size: 13px; color: #4a5568;">Soil Properties:</strong>
+                    <div style="margin-top: 8px; font-size: 11px; color: #718096; line-height: 1.5;">
+                        <div><strong>Sand:</strong> Quick temp changes, poor water retention</div>
+                        <div><strong>Clay:</strong> Stable temps, excellent water retention</div>
+                        <div><strong>Rock:</strong> High thermal mass, minimal moisture</div>
+                        <div><strong>Loam:</strong> Balanced properties, good for plants</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                    <strong style="font-size: 13px; color: #4a5568;">Wind Arrow Colors:</strong>
+                    <div style="margin-top: 8px; font-size: 12px; color: #718096;">
+                        <div>🔵 Blue = Katabatic (cold drainage)</div>
+                        <div>🔴 Red = Föhn (warm downslope)</div>
+                        <div>⚪ White = Normal wind flow</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                    <strong style="font-size: 13px; color: #4a5568;">Cloud Types:</strong>
+                    <div style="margin-top: 8px; font-size: 12px; color: #718096;">
+                        <div>☁️ <strong>Cumulus:</strong> Fair weather clouds (afternoon)</div>
+                        <div>⛈️ <strong>Cumulonimbus:</strong> Thunderstorms (heavy rain)</div>
+                        <div>🌫️ <strong>Stratus:</strong> Low clouds/fog (drizzle)</div>
+                        <div>🏔️ <strong>Orographic:</strong> Mountain-forced clouds</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                    <strong style="font-size: 13px; color: #4a5568;">Precipitation Types:</strong>
+                    <div style="margin-top: 8px; font-size: 12px; color: #718096;">
+                        <div>💧 Rain (T > 2°C)</div>
+                        <div>❄️ Snow (T < -5°C)</div>
+                        <div>🧊 Sleet (-5°C < T < 2°C)</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="info-panel">
+                <strong>Tips:</strong><br>
+                • Sand: Hot days, cold nights<br>
+                • Clay: Stable temps, holds moisture<br>
+                • Rock: Slow to heat/cool<br>
+                • Loam: Balanced properties<br>
+                • Wet soil = cooler (evaporation)<br>
+                • Toggle soil view to see types<br>
+                • Soil temp affects air temp<br>
+                • Desert effect: sand + dry = extremes<br>
+                • Clouds: Block sun, trap heat at night<br>
+                • Orographic: Wind + mountains = clouds<br>
+                • Afternoon: Convective clouds over hot areas<br>
+                • Rain cools, snow insulates
+            </div>
+        </div>
+    </div>
+    
+    <script type="module" src="index.tsx"></script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
