@@ -1,140 +1,33 @@
-// ===== CONSTANTS AND CONFIGURATION =====
-const GRID_SIZE = 100;
-const CELL_SIZE = 6;
-const BASE_ELEVATION = 100;
-const LAPSE_RATE = 0.65; // °C per 100m
-const SOLAR_INTENSITY_FACTOR = 1.5; // Reduced from 2
-const SHADOW_COOLING = 0.8; // Reduced from 1
-const WIND_CHILL_FACTOR = 0.03; // Reduced from 0.05
-const COLD_AIR_FLOW_INTENSITY = 2; // Reduced from 3
-const DIFFUSION_ITERATIONS = 2; // Reduced from 3
-const DIFFUSION_RATE = 0.08; // Reduced from 0.15
-const URBAN_HEAT_RADIUS = 60; // Reduced from 8
-const SETTLEMENT_HEAT_RADIUS = 4; // Reduced from 5
-const FOG_WIND_DISSIPATION = 0.02;
-const FOG_SUN_DISSIPATION = 0.5;
-const FOG_TEMP_DISSIPATION = 0.3;
-const FOG_ADVECTION_RATE = 0.1;
-const FOG_DOWNSLOPE_RATE = 0.2;
-const FOG_DIFFUSION_RATE = 0.4;
-const EPSILON = 1e-6; // A small number to prevent division by zero
-
-// Temperature ranges by month (base temperatures)
-const MONTHLY_TEMPS = [-10, -8, -3, 2, 8, 13, 15, 15, 8, 2, -4, -9];
-
-
-// Land cover types
-const LAND_TYPES = {
-    GRASSLAND: 0,
-    FOREST: 1,
-    WATER: 2,
-    URBAN: 3,
-    SETTLEMENT: 4
-};
-
-const LAND_TYPE_MAP: { [key: string]: number } = {
-    'grassland': LAND_TYPES.GRASSLAND,
-    'forest': LAND_TYPES.FOREST,
-    'water': LAND_TYPES.WATER,
-    'urban': LAND_TYPES.URBAN,
-    'settlement': LAND_TYPES.SETTLEMENT
-};
-
-// Soil types with thermal properties
-const SOIL_TYPES = {
-    LOAM: 0,
-    SAND: 1,
-    CLAY: 2,
-    ROCK: 3
-};
-
-const SOIL_TYPE_MAP: { [key: string]: number } = {
-    'loam': SOIL_TYPES.LOAM,
-    'sand': SOIL_TYPES.SAND,
-    'clay': SOIL_TYPES.CLAY,
-    'rock': SOIL_TYPES.ROCK
-};
-
-// Unified Thermal Properties for all surface types
-const WATER_PROPERTIES = {
-    name: 'Water',
-    color: '#4a9eff',
-    heatCapacity: 15.0,      // Very high - massive thermal inertia (Reduced from 20.0)
-    conductivity: 4.0,       // High - good heat transfer within water (Reduced from 5.0)
-    waterRetention: 1.0,     // N/A
-    albedo: 0.08,            // Low reflectivity - absorbs energy
-    evaporation: 1.5         // High evaporation rate
-};
-
-const URBAN_PROPERTIES = {
-    name: 'Urban',
-    color: '#8b8b8b',
-    heatCapacity: 1.6,       // High - stores a lot of heat (concrete/asphalt) (Reduced from 1.8)
-    conductivity: 2.0,       // Very high - conducts heat well (Reduced from 2.2)
-    waterRetention: 0.05,    // Almost zero
-    albedo: 0.12,            // Low - absorbs sunlight
-    evaporation: 0.1         // Very low evaporation
-};
-
-const SETTlement_PROPERTIES = {
-    name: 'Settlement',
-    color: '#a67c52',
-    heatCapacity: 1.3,       // Higher than soil, less than urban (Reduced from 1.4)
-    conductivity: 1.6,       // High (Reduced from 1.8)
-    waterRetention: 0.2,     // Low
-    albedo: 0.18,            // Moderate
-    evaporation: 0.4         // Low
-};
-
-
-// Soil thermal properties
-const SOIL_PROPERTIES = {
-    [SOIL_TYPES.LOAM]: {
-        name: 'Loam',
-        color: '#8B7355',
-        heatCapacity: 1.0,      // Baseline - moderate
-        conductivity: 1.0,       // Baseline - moderate
-        waterRetention: 0.7,     // Good water retention
-        albedo: 0.2,            // Moderate reflectivity
-        evaporation: 1.0        // Normal evaporation rate
-    },
-    [SOIL_TYPES.SAND]: {
-        name: 'Sand',
-        color: '#F4E4BC',
-        heatCapacity: 0.8,      // Low - heats/cools quickly
-        conductivity: 0.4,       // Low - poor heat transfer
-        waterRetention: 0.2,     // Poor water retention
-        albedo: 0.55,           // High reflectivity (light color)
-        evaporation: 1.2        // Fast evaporation
-    },
-    [SOIL_TYPES.CLAY]: {
-        name: 'Clay',
-        color: '#A0522D',
-        heatCapacity: 1.1,      // High - slow to heat/cool
-        conductivity: 1.3,       // High - good heat transfer
-        waterRetention: 0.9,     // Excellent water retention
-        albedo: 0.15,           // Low reflectivity (dark when wet)
-        evaporation: 0.6        // Slow evaporation
-    },
-    [SOIL_TYPES.ROCK]: {
-        name: 'Rock/Bedrock',
-        color: '#696969',
-        heatCapacity: 1.2,      // Very high - thermal mass
-        conductivity: 2.0,       // Very high - excellent conductor
-        waterRetention: 0.1,     // Almost no water retention
-        albedo: 0.25,           // Variable reflectivity
-        evaporation: 0.1        // Minimal evaporation
-    }
-};
-
-// Colors for land types
-const LAND_COLORS = {
-    [LAND_TYPES.GRASSLAND]: '#90b56a',
-    [LAND_TYPES.FOREST]: '#2d5a2d',
-    [LAND_TYPES.WATER]: '#4a9eff',
-    [LAND_TYPES.URBAN]: '#8b8b8b',
-    [LAND_TYPES.SETTLEMENT]: '#a67c52'
-};
+import {
+    BASE_ELEVATION,
+    CELL_SIZE,
+    COLD_AIR_FLOW_INTENSITY,
+    DIFFUSION_ITERATIONS,
+    DIFFUSION_RATE,
+    EPSILON,
+    FOG_ADVECTION_RATE,
+    FOG_DIFFUSION_RATE,
+    FOG_DOWNSLOPE_RATE,
+    FOG_SUN_DISSIPATION,
+    FOG_TEMP_DISSIPATION,
+    FOG_WIND_DISSIPATION,
+    GRID_SIZE,
+    LAND_COLORS,
+    LAND_TYPE_MAP,
+    LAPSE_RATE,
+    MONTHLY_TEMPS,
+    SETTLEMENT_HEAT_RADIUS,
+    SETTLEMENT_PROPERTIES,
+    SHADOW_COOLING,
+    SOIL_PROPERTIES,
+    SOIL_TYPE_MAP,
+    SOLAR_INTENSITY_FACTOR,
+    URBAN_HEAT_RADIUS,
+    URBAN_PROPERTIES,
+    WATER_PROPERTIES,
+    WIND_CHILL_FACTOR,
+} from './src/shared/constants';
+import { LAND_TYPES, SOIL_TYPES } from './src/shared/types';
 
 // ===== GLOBAL STATE =====
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -249,7 +142,7 @@ function getThermalProperties(x: number, y: number) {
     const land = landCover[y][x];
     if (land === LAND_TYPES.WATER) return WATER_PROPERTIES;
     if (land === LAND_TYPES.URBAN) return URBAN_PROPERTIES;
-    if (land === LAND_TYPES.SETTLEMENT) return SETTlement_PROPERTIES;
+    if (land === LAND_TYPES.SETTLEMENT) return SETTLEMENT_PROPERTIES;
     return SOIL_PROPERTIES[soilType[y][x]];
 }
 
