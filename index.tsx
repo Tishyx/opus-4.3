@@ -1681,7 +1681,7 @@ function drawOnCanvas(gridX: number, gridY: number): void {
                 const power = 1 - (distance(x, y, gridX, gridY) / state.brushSize);
                 
                 if (state.currentBrushCategory === 'terrain') {
-                    const change = (state.isRightClick ? -terrainStrength : state.terrainStrength) * power;
+                    const change = (state.isRightClick ? -state.terrainStrength : state.terrainStrength) * power;
                     state.elevation[y][x] = clamp(state.elevation[y][x] + change, 0, 1000);
                      needsRecalculation = true;
                 } else if (state.currentBrushCategory === 'land') {
