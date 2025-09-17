@@ -63,7 +63,8 @@ function getThermalProperties(x: number, y: number) {
     if (land === LAND_TYPES.WATER) return WATER_PROPERTIES;
     if (land === LAND_TYPES.URBAN) return URBAN_PROPERTIES;
     if (land === LAND_TYPES.SETTLEMENT) return SETTLEMENT_PROPERTIES;
-    return SOIL_PROPERTIES[state.soilType[y][x]];
+    const soilType = state.soilType[y][x];
+    return SOIL_PROPERTIES[soilType] ?? SOIL_PROPERTIES[SOIL_TYPES.LOAM];
 }
 
 // ===== ATMOSPHERIC ADVECTION ENGINE =====
