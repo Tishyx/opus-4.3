@@ -42,7 +42,6 @@ function initializeGrids(): void {
     runSimulation(0);
 }
 
-
 function runSimulation(simDeltaTimeMinutes: number): void {
     if (!ctx) return;
 
@@ -65,7 +64,10 @@ function runSimulation(simDeltaTimeMinutes: number): void {
 
     updateSimulationClock(state.simulationTime);
 
-    const sunAltitude = Math.max(0, Math.sin(((currentHour + currentMinute / 60) - 6) * Math.PI / 12));
+    const sunAltitude = Math.max(
+        0,
+        Math.sin(((currentHour + currentMinute / 60) - 6) * Math.PI / 12)
+    );
     const timeFactor = simDeltaTimeMinutes / 60;
 
     resetGrid(state.latentHeatEffect, 0);
@@ -107,7 +109,8 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     }
 
     if (enableInversions) {
-        const totalCloudCover = state.cloudCoverage.flat().reduce((a, b) => a + b, 0) / (GRID_SIZE * GRID_SIZE);
+        const totalCloudCover =
+            state.cloudCoverage.flat().reduce((a, b) => a + b, 0) / (GRID_SIZE * GRID_SIZE);
         calculateInversionLayer(state, currentHour, windSpeed, totalCloudCover);
     } else {
         state.inversionHeight = 0;
@@ -139,14 +142,14 @@ function simulationLoop(currentTime: number) {
     state.lastFrameTime = currentTime;
 
     if (state.isSimulating) {
-        const simDeltaTimeMinutes = deltaTime * SIM_MINUTES_PER_REAL_SECOND * state.simulationSpeed;
+        const simDeltaTimeMinutes =
+            deltaTime * SIM_MINUTES_PER_REAL_SECOND * state.simulationSpeed;
         state.simulationTime += simDeltaTimeMinutes;
         runSimulation(simDeltaTimeMinutes);
     }
 
     requestAnimationFrame(simulationLoop);
 }
-
 
 // ===== INITIALIZATION =====
 const eventCallbacks: SimulationEventCallbacks = {
