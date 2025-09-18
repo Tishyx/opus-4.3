@@ -584,7 +584,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
             for (let x = 0; x < GRID_SIZE; x++) {
                 const prevAirTemp = state.temperature[y][x];
                 const prevSoilTemp = state.soilTemperature[y][x];
-                const thermalProps = getThermalProperties(state, x, y);
+                const thermalProps = getThermalProperties(x, y);
 
                 let airEnergyBalance = 0;
                 let soilEnergyBalance = 0;
