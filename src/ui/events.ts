@@ -162,7 +162,7 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
         callbacks.runSimulationFrame();
     });
 
-    document.querySelectorAll('#controls input[type="checkbox"]').forEach(element => {
+    document.querySelectorAll('.controls input[type="checkbox"]').forEach(element => {
         element.addEventListener('change', () => {
             const checkbox = element as HTMLInputElement;
             if (checkbox.id.startsWith('show')) {
