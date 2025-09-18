@@ -1,6 +1,8 @@
 import { GRID_SIZE } from './src/shared/constants';
 import {
     createSimulationState,
+    resetGrid,
+    resetVectorField,
     resizeCanvas,
     type SimulationState,
 } from './src/simulation/state';
@@ -62,29 +64,20 @@ function runSimulation(simDeltaTimeMinutes: number): void {
 
     updateSimulationClock(state.simulationTime);
 
-    const sunAltitude = Math.max(0, Math.sin(((currentHour + currentMinute / 60) - 6) * Math.PI / 12));
+    const sunAltitude = Math.max(
+        0,
+        Math.sin(((currentHour + currentMinute / 60) - 6) * Math.PI / 12)
+    );
     const timeFactor = simDeltaTimeMinutes / 60;
 
-    state.latentHeatEffect = Array(GRID_SIZE)
-        .fill(null)
-        .map(() => Array(GRID_SIZE).fill(0));
+    resetGrid(state.latentHeatEffect, 0);
 
     if (enableDownslope) {
         calculateDownslopeWinds(state, currentHour, windSpeed, windDir, windGustiness);
     } else {
-        state.downSlopeWinds = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
-        state.windVectorField = Array(GRID_SIZE)
-            .fill(null)
-            .map(() =>
-                Array(GRID_SIZE)
-                    .fill(null)
-                    .map(() => ({ x: 0, y: 0, speed: 0 }))
-            );
-        state.foehnEffect = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
+        resetGrid(state.downSlopeWinds, 0);
+        resetVectorField(state.windVectorField);
+        resetGrid(state.foehnEffect, 0);
     }
 
     if (enableAdvection && timeFactor > 0) {
@@ -102,19 +95,22 @@ function runSimulation(simDeltaTimeMinutes: number): void {
             timeFactor,
         });
     } else {
-        state.cloudCoverage = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
-        state.precipitation = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
-        state.thermalStrength = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
+        resetGrid(state.cloudCoverage, 0);
+        resetGrid(state.cloudWater, 0);
+        resetGrid(state.cloudOpticalDepth, 0);
+        resetGrid(state.cloudBase, 0);
+        resetGrid(state.cloudTop, 0);
+        resetGrid(state.cloudType, 0);
+        resetGrid(state.precipitation, 0);
+        resetGrid(state.precipitationType, 0);
+        resetGrid(state.thermalStrength, 0);
+        resetGrid(state.convectiveEnergy, 0);
+        resetGrid(state.iceContent, 0);
     }
 
     if (enableInversions) {
-        const totalCloudCover = state.cloudCoverage.flat().reduce((a, b) => a + b, 0) / (GRID_SIZE * GRID_SIZE);
+        const totalCloudCover =
+            state.cloudCoverage.flat().reduce((a, b) => a + b, 0) / (GRID_SIZE * GRID_SIZE);
         calculateInversionLayer(state, currentHour, windSpeed, totalCloudCover);
     } else {
         state.inversionHeight = 0;
@@ -146,7 +142,8 @@ function simulationLoop(currentTime: number) {
     state.lastFrameTime = currentTime;
 
     if (state.isSimulating) {
-        const simDeltaTimeMinutes = deltaTime * SIM_MINUTES_PER_REAL_SECOND * state.simulationSpeed;
+        const simDeltaTimeMinutes =
+            deltaTime * SIM_MINUTES_PER_REAL_SECOND * state.simulationSpeed;
         state.simulationTime += simDeltaTimeMinutes;
         runSimulation(simDeltaTimeMinutes);
     }

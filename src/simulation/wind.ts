@@ -1,5 +1,5 @@
 import { CELL_SIZE, EPSILON, GRID_SIZE } from '../shared/constants';
-import type { SimulationState, VectorField } from './state';
+import { resetGrid, resetVectorField, type SimulationState, type VectorField } from './state';
 import { isInBounds } from './utils';
 
 type ExitPoint = { elev: number; x: number; y: number };
@@ -53,15 +53,9 @@ export function calculateDownslopeWinds(
   windDir: number,
   windGustiness: number
 ): void {
-  state.downSlopeWinds = Array(GRID_SIZE)
-    .fill(null)
-    .map(() => Array(GRID_SIZE).fill(0));
-  state.windVectorField = Array(GRID_SIZE)
-    .fill(null)
-    .map(() => Array(GRID_SIZE).fill(null).map(() => ({ x: 0, y: 0, speed: 0 })));
-  state.foehnEffect = Array(GRID_SIZE)
-    .fill(null)
-    .map(() => Array(GRID_SIZE).fill(0));
+  resetGrid(state.downSlopeWinds, 0);
+  resetVectorField(state.windVectorField);
+  resetGrid(state.foehnEffect, 0);
 
   const isNightTime = hour <= 6 || hour >= 19;
   const windDirRad = (windDir * Math.PI) / 180;
