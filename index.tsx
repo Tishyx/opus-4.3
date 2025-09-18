@@ -28,100 +28,20 @@ import {
     WIND_CHILL_FACTOR,
 } from './src/shared/constants';
 import { LAND_TYPES, SOIL_TYPES } from './src/shared/types';
+import {
+    createSimulationState,
+    resizeCanvas,
+    type SimulationState,
+} from './src/simulation/state';
+import { CLOUD_TYPES, PRECIP_TYPES } from './src/simulation/weatherTypes';
 
 // ===== GLOBAL STATE =====
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d');
 const tooltip = document.getElementById('tooltip') as HTMLElement;
 
-canvas.width = GRID_SIZE * CELL_SIZE;
-canvas.height = GRID_SIZE * CELL_SIZE;
-
-// Grid data structures - Initialize with empty 2D arrays
-let elevation: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(BASE_ELEVATION));
-let landCover: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let soilType: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let temperature: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(20));
-let hillshade: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(1));
-
-// Distance and area fields for dynamic effects
-let waterDistance: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-let nearestWaterAreaId: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let forestDistance: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-let nearestForestAreaId: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let forestDepth: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let urbanDistance: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-let contiguousAreas: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let areasizes = new Map<number, number>();
-
-// Atmospheric layers for inversions
-let inversionHeight = 0;
-let inversionStrength = 0;
-let fogDensity: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-
-// Downslope wind fields
-let downSlopeWinds: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let windVectorField: {x: number, y: number, speed: number}[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
-let foehnEffect: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let inversionAndDownslopeRate: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-
-// Soil moisture and temperature
-let soilMoisture: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let soilTemperature: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(20));
-
-// Cloud dynamics system
-let cloudCoverage: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let cloudBase: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let cloudTop: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let cloudType: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let cloudOpticalDepth: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let precipitation: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let precipitationType: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let humidity: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0.5));
-let dewPoint: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(10));
-let convectiveEnergy: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let thermalStrength: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let cloudWater: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let iceContent: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-let latentHeatEffect: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-
-// Snow simulation system
-let snowDepth: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-
-// Cloud type constants
-const CLOUD_TYPES = {
-    NONE: 0,
-    CUMULUS: 1,
-    STRATUS: 2,
-    CUMULONIMBUS: 3,
-    OROGRAPHIC: 4,
-    CIRRUS: 5,
-    ALTOSTRATUS: 6
-};
-
-// Precipitation type constants
-const PRECIP_TYPES = {
-    NONE: 0,
-    RAIN: 1,
-    SNOW: 2,
-    SLEET: 3,
-    FREEZING_RAIN: 4,
-    GRAUPEL: 5
-};
-
-// Brush settings
-let currentBrush = 'terrain';
-let currentBrushCategory = 'terrain';
-let brushSize = 15;
-let terrainStrength = 5;
-let isDrawing = false;
-let isRightClick = false;
-
-// ===== SIMULATION STATE =====
-let isSimulating = false;
-let simulationTime = 6 * 60; // Start at 06:00, in minutes
-let simulationSpeed = 10;
-let lastFrameTime = performance.now();
+const state: SimulationState = createSimulationState();
+resizeCanvas(canvas);
 const SIM_MINUTES_PER_REAL_SECOND = 15; // At 1x speed, 1 real second = 15 sim minutes
 
 // ===== UTILITY FUNCTIONS =====
@@ -139,11 +59,12 @@ function isInBounds(x: number, y: number): boolean {
 
 // Helper to get the correct thermal properties for a cell
 function getThermalProperties(x: number, y: number) {
-    const land = landCover[y][x];
+    const land = state.landCover[y][x];
     if (land === LAND_TYPES.WATER) return WATER_PROPERTIES;
     if (land === LAND_TYPES.URBAN) return URBAN_PROPERTIES;
     if (land === LAND_TYPES.SETTLEMENT) return SETTLEMENT_PROPERTIES;
-    return SOIL_PROPERTIES[soilType[y][x]];
+    const soilType = state.soilType[y][x];
+    return SOIL_PROPERTIES[soilType] ?? SOIL_PROPERTIES[SOIL_TYPES.LOAM];
 }
 
 // ===== ATMOSPHERIC ADVECTION ENGINE =====
@@ -200,8 +121,8 @@ function calculateCloudCoverage(x: number, y: number, hour: number, humidity: nu
     let coverage = 0;
     
     // Higher humidity = more clouds
-    if (humidity[y][x] > 0.7) {
-        coverage = (humidity[y][x] - 0.7) / 0.3; // 0 to 1 scale
+    if (state.humidity[y][x] > 0.7) {
+        coverage = (state.humidity[y][x] - 0.7) / 0.3; // 0 to 1 scale
     }
     
     // Increase cloud coverage in afternoon (convective development)
@@ -211,7 +132,7 @@ function calculateCloudCoverage(x: number, y: number, hour: number, humidity: nu
     }
     
     // Increase clouds over water bodies (evaporation)
-    if (landCover[y][x] === LAND_TYPES.WATER) {
+    if (state.landCover[y][x] === LAND_TYPES.WATER) {
         coverage += 0.2;
     }
     
@@ -231,8 +152,8 @@ function calculateOrographicClouds(x: number, y: number, windSpeed: number, wind
     let liftAmount = 0;
     
     if (isInBounds(x-1, y-1) && isInBounds(x+1, y+1)) {
-        const dzdx = (elevation[y][x + 1] - elevation[y][x - 1]) / (2 * CELL_SIZE);
-        const dzdy = (elevation[y + 1][x] - elevation[y - 1][x]) / (2 * CELL_SIZE);
+        const dzdx = (state.elevation[y][x + 1] - state.elevation[y][x - 1]) / (2 * CELL_SIZE);
+        const dzdy = (state.elevation[y + 1][x] - state.elevation[y - 1][x]) / (2 * CELL_SIZE);
         
         // Dot product of wind and upslope direction
         const slopeDotWind = dzdx * windX + dzdy * windY;
@@ -246,7 +167,7 @@ function calculateOrographicClouds(x: number, y: number, windSpeed: number, wind
     if (!isWindward) return 0;
     
     // Calculate lifting condensation level (LCL)
-    const dewPointDeficit = temperature[y][x] - dewPoint[y][x];
+    const dewPointDeficit = state.temperature[y][x] - state.dewPoint[y][x];
     const LCL = 125 * dewPointDeficit; // Approximate LCL height in meters
     
     // If terrain forces air above LCL, clouds form
@@ -264,7 +185,7 @@ function calculateOrographicClouds(x: number, y: number, windSpeed: number, wind
 function calculatePrecipitation(x: number, y: number, cloudWater: number[][], cloudType: number[][], temperature: number[][]): {rate: number, type: number} {
     let precipRate = 0; // rate in mm/hr
     let precipType = PRECIP_TYPES.NONE;
-    const localCloudWater = cloudWater[y][x];
+    const localCloudWater = state.cloudWater[y][x];
 
     // No precipitation if there's very little cloud water
     if (localCloudWater < 0.2) return { rate: 0, type: PRECIP_TYPES.NONE };
@@ -273,7 +194,7 @@ function calculatePrecipitation(x: number, y: number, cloudWater: number[][], cl
     let precipProbability = 0;
 
     // Determine efficiency and probability based on cloud type
-    switch(cloudType[y][x]) {
+    switch(state.cloudType[y][x]) {
         case CLOUD_TYPES.CUMULUS:
             precipProbability = Math.max(0, (localCloudWater - 0.5) / 0.5); 
             precipEfficiency = 0.2;
@@ -300,9 +221,9 @@ function calculatePrecipitation(x: number, y: number, cloudWater: number[][], cl
     precipRate = Math.min(precipRate, 2.0); // Cap precipitation rate (e.g., 2 mm/hr)
 
     if (precipRate > 0.01) {
-        if (temperature[y][x] > 2) {
+        if (state.temperature[y][x] > 2) {
             precipType = PRECIP_TYPES.RAIN;
-        } else if (temperature[y][x] <= -5) {
+        } else if (state.temperature[y][x] <= -5) {
             precipType = PRECIP_TYPES.SNOW;
         } else {
             precipType = PRECIP_TYPES.SLEET;
@@ -316,24 +237,28 @@ function calculatePrecipitation(x: number, y: number, cloudWater: number[][], cl
 }
 
 // Step 4: Convective cloud development
-function calculateConvectiveClouds(x: number, y: number, hour: number, surfaceTemp: number, humidity: number[][]): {development: number, type: number, cape: number, thermalStrength: number} {
-    const baseTemp = calculateBaseTemperature(
-        parseInt((document.getElementById('month') as HTMLSelectElement).value),
-        hour
-    );
+function calculateConvectiveClouds(
+    x: number,
+    y: number,
+    month: number,
+    hour: number,
+    surfaceTemp: number,
+    humidity: number[][]
+): {development: number, type: number, cape: number, thermalStrength: number} {
+    const baseTemp = calculateBaseTemperature(month, hour);
     
     let thermal = 0;
     
     if (hour >= 10 && hour <= 17) {
         const tempExcess = surfaceTemp - baseTemp;
         
-        if (landCover[y][x] === LAND_TYPES.URBAN) {
+        if (state.landCover[y][x] === LAND_TYPES.URBAN) {
             thermal = tempExcess * 1.3;
-        } else if (soilType[y][x] === SOIL_TYPES.SAND) {
+        } else if (state.soilType[y][x] === SOIL_TYPES.SAND) {
             thermal = tempExcess * 1.1;
-        } else if (landCover[y][x] === LAND_TYPES.GRASSLAND) {
+        } else if (state.landCover[y][x] === LAND_TYPES.GRASSLAND) {
             thermal = tempExcess;
-        } else if (landCover[y][x] === LAND_TYPES.WATER || landCover[y][x] === LAND_TYPES.FOREST) {
+        } else if (state.landCover[y][x] === LAND_TYPES.WATER || state.landCover[y][x] === LAND_TYPES.FOREST) {
             thermal = tempExcess * 0.5;
         }
     }
@@ -362,17 +287,17 @@ function calculateConvectiveClouds(x: number, y: number, hour: number, surfaceTe
 
 // Step 5: Cloud microphysics
 function calculateCloudMicrophysics(x: number, y: number, cloudWater: number[][], temperature: number[][], updraftSpeed: number): {ice: number, dropletSize: number, precipEfficiency: number, graupel: number} {
-    let iceContent = 0;
+    let iceContent = state.iceContent[y][x];
     let dropletSize = 5;
     let precipitationEfficiency = 0;
     
-    if (temperature[y][x] < 0 && cloudWater[y][x] > 0) {
-        const freezingRate = Math.exp(-temperature[y][x] / 10);
-        iceContent = cloudWater[y][x] * freezingRate;
-        cloudWater[y][x] *= (1 - freezingRate * 0.5);
+    if (state.temperature[y][x] < 0 && state.cloudWater[y][x] > 0) {
+        const freezingRate = Math.exp(-state.temperature[y][x] / 10);
+        iceContent = state.cloudWater[y][x] * freezingRate;
+        state.cloudWater[y][x] *= (1 - freezingRate * 0.5);
     }
     
-    if (temperature[y][x] > 0 && cloudWater[y][x] > 0.3) {
+    if (state.temperature[y][x] > 0 && state.cloudWater[y][x] > 0.3) {
         dropletSize = 5 + updraftSpeed * 2;
         if (dropletSize > 20) {
             precipitationEfficiency = Math.min(1, dropletSize / 50);
@@ -380,10 +305,10 @@ function calculateCloudMicrophysics(x: number, y: number, cloudWater: number[][]
     }
     
     let graupelFormation = 0;
-    if (temperature[y][x] > -10 && temperature[y][x] < 0 && updraftSpeed > 5) {
+    if (state.temperature[y][x] > -10 && state.temperature[y][x] < 0 && updraftSpeed > 5) {
         graupelFormation = iceContent * 0.3;
     }
-    
+
     return {
         ice: iceContent,
         dropletSize: dropletSize,
@@ -394,15 +319,15 @@ function calculateCloudMicrophysics(x: number, y: number, cloudWater: number[][]
 
 function calculateCloudRadiation(x: number, y: number, cloudCoverage: number[][], cloudOpticalDepth: number[][], sunAltitude: number): {solarTransmission: number, longwaveWarming: number} {
     let solarTransmission = 1;
-    if (cloudCoverage[y][x] > 0) {
-        const opticalPath = cloudOpticalDepth[y][x] / Math.max(0.1, Math.sin(sunAltitude));
-        solarTransmission = (1 - cloudCoverage[y][x]) + 
-                           cloudCoverage[y][x] * Math.exp(-opticalPath);
+    if (state.cloudCoverage[y][x] > 0) {
+        const opticalPath = state.cloudOpticalDepth[y][x] / Math.max(0.1, Math.sin(sunAltitude));
+        solarTransmission = (1 - state.cloudCoverage[y][x]) + 
+                           state.cloudCoverage[y][x] * Math.exp(-opticalPath);
     }
     
     let longwaveEffect = 0;
-    if (cloudCoverage[y][x] > 0) {
-        longwaveEffect = cloudCoverage[y][x] * 3;
+    if (state.cloudCoverage[y][x] > 0) {
+        longwaveEffect = state.cloudCoverage[y][x] * 3;
     }
     
     return {
@@ -414,14 +339,14 @@ function calculateCloudRadiation(x: number, y: number, cloudCoverage: number[][]
 function updateHumidity(x: number, y: number, temperature: number[][], windSpeed: number, precipRate: number, precipType: number, timeFactor: number): void {
     let evaporationRate = 0; // rate in %/hr
     
-    if (landCover[y][x] === LAND_TYPES.WATER) {
-        evaporationRate = 2.0 * Math.max(0, temperature[y][x] / 30) * (1 + windSpeed / 20);
-    } else if (landCover[y][x] === LAND_TYPES.FOREST) {
-        evaporationRate = 1.0 * Math.max(0, temperature[y][x] / 30);
-    } else if (soilMoisture[y][x] > 0) {
+    if (state.landCover[y][x] === LAND_TYPES.WATER) {
+        evaporationRate = 2.0 * Math.max(0, state.temperature[y][x] / 30) * (1 + windSpeed / 20);
+    } else if (state.landCover[y][x] === LAND_TYPES.FOREST) {
+        evaporationRate = 1.0 * Math.max(0, state.temperature[y][x] / 30);
+    } else if (state.soilMoisture[y][x] > 0) {
         const thermalProps = getThermalProperties(x, y);
-        const soilEvap = soilMoisture[y][x] * thermalProps.evaporation;
-        evaporationRate = soilEvap * 1.0 * Math.max(0, temperature[y][x] / 30);
+        const soilEvap = state.soilMoisture[y][x] * thermalProps.evaporation;
+        evaporationRate = soilEvap * 1.0 * Math.max(0, state.temperature[y][x] / 30);
     }
     
     let precipReductionRate = 0;
@@ -430,79 +355,86 @@ function updateHumidity(x: number, y: number, temperature: number[][], windSpeed
     }
 
     const humidityChange = (evaporationRate - precipReductionRate) * timeFactor / 100;
-    humidity[y][x] = clamp(humidity[y][x] + humidityChange, 0.01, 1);
+    state.humidity[y][x] = clamp(state.humidity[y][x] + humidityChange, 0.01, 1);
     
     const a = 17.27;
     const b = 237.7;
-    const relHumidity = humidity[y][x];
-    const gamma = Math.log(relHumidity) + (a * temperature[y][x]) / (b + temperature[y][x]);
-    dewPoint[y][x] = (b * gamma) / (a - gamma);
+    const relHumidity = state.humidity[y][x];
+    const gamma = Math.log(relHumidity) + (a * state.temperature[y][x]) / (b + state.temperature[y][x]);
+    state.dewPoint[y][x] = (b * gamma) / (a - gamma);
 }
 
-function updateCloudDynamics(hour: number, windSpeed: number, windDir: number, timeFactor: number): void {
+function updateCloudDynamics(month: number, hour: number, windSpeed: number, windDir: number, timeFactor: number): void {
     if (timeFactor <= 0) return;
 
     const sunAltitude = Math.max(0, Math.sin((hour - 6) * Math.PI / 12));
     
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const orographicFormationRate = calculateOrographicClouds(x, y, windSpeed, windDir, humidity, temperature) * 2.0; // rate in water/hr
+            const orographicFormationRate = calculateOrographicClouds(x, y, windSpeed, windDir, state.humidity, state.temperature) * 2.0; // rate in water/hr
             
-            const convective = calculateConvectiveClouds(x, y, hour, temperature[y][x], humidity);
+            const convective = calculateConvectiveClouds(
+                x,
+                y,
+                month,
+                hour,
+                state.temperature[y][x],
+                state.humidity
+            );
             const convectiveFormationRate = convective.development * 2.0;
-            
-            convectiveEnergy[y][x] = convective.cape;
-            thermalStrength[y][x] = convective.thermalStrength;
+
+            state.convectiveEnergy[y][x] = convective.cape;
+            state.thermalStrength[y][x] = convective.thermalStrength;
             
             let cloudFormationRate = 0;
             if (orographicFormationRate > 0.5) {
-                cloudType[y][x] = CLOUD_TYPES.OROGRAPHIC;
+                state.cloudType[y][x] = CLOUD_TYPES.OROGRAPHIC;
                 cloudFormationRate = orographicFormationRate;
-                cloudBase[y][x] = elevation[y][x] + 100;
-                cloudTop[y][x] = elevation[y][x] + 500 + orographicFormationRate * 1000;
+                state.cloudBase[y][x] = state.elevation[y][x] + 100;
+                state.cloudTop[y][x] = state.elevation[y][x] + 500 + orographicFormationRate * 1000;
             } else if (convectiveFormationRate > 0.3) {
-                cloudType[y][x] = convective.type;
+                state.cloudType[y][x] = convective.type;
                 cloudFormationRate = convectiveFormationRate;
-                cloudBase[y][x] = elevation[y][x] + 500;
-                cloudTop[y][x] = elevation[y][x] + 500 + convective.cape;
-            } else if (fogDensity[y][x] > 0.5) {
-                cloudType[y][x] = CLOUD_TYPES.STRATUS;
-                cloudFormationRate = fogDensity[y][x] * 0.5;
-                cloudBase[y][x] = elevation[y][x];
-                cloudTop[y][x] = elevation[y][x] + 200;
+                state.cloudBase[y][x] = state.elevation[y][x] + 500;
+                state.cloudTop[y][x] = state.elevation[y][x] + 500 + convective.cape;
+            } else if (state.fogDensity[y][x] > 0.5) {
+                state.cloudType[y][x] = CLOUD_TYPES.STRATUS;
+                cloudFormationRate = state.fogDensity[y][x] * 0.5;
+                state.cloudBase[y][x] = state.elevation[y][x];
+                state.cloudTop[y][x] = state.elevation[y][x] + 200;
             } else {
-                cloudType[y][x] = CLOUD_TYPES.NONE;
+                state.cloudType[y][x] = CLOUD_TYPES.NONE;
             }
             
-            const solarDissipationRate = sunAltitude > 0 ? cloudWater[y][x] * sunAltitude * 0.8 : 0;
+            const solarDissipationRate = sunAltitude > 0 ? state.cloudWater[y][x] * sunAltitude * 0.8 : 0;
             
-            const precip = calculatePrecipitation(x, y, cloudWater, cloudType, temperature);
+            const precip = calculatePrecipitation(x, y, state.cloudWater, state.cloudType, state.temperature);
             const precipRate = precip.rate; // mm/hr
-            precipitation[y][x] = precipRate;
-            precipitationType[y][x] = precip.type;
+            state.precipitation[y][x] = precipRate;
+            state.precipitationType[y][x] = precip.type;
             const precipWaterLossRate = precipRate * 0.1;
 
             const cloudWaterChange = (cloudFormationRate - solarDissipationRate - precipWaterLossRate) * timeFactor;
-            cloudWater[y][x] = clamp(cloudWater[y][x] + cloudWaterChange, 0, 1.5);
+            state.cloudWater[y][x] = clamp(state.cloudWater[y][x] + cloudWaterChange, 0, 1.5);
             
-            cloudCoverage[y][x] = Math.min(1, cloudWater[y][x]);
-            cloudOpticalDepth[y][x] = cloudWater[y][x] * 10;
+            state.cloudCoverage[y][x] = Math.min(1, state.cloudWater[y][x]);
+            state.cloudOpticalDepth[y][x] = state.cloudWater[y][x] * 10;
             
-            updateHumidity(x, y, temperature, windSpeed, precipRate, precip.type, timeFactor);
+            updateHumidity(x, y, state.temperature, windSpeed, precipRate, precip.type, timeFactor);
             
-            const updraft = thermalStrength[y][x] * 2;
-            const microphysics = calculateCloudMicrophysics(x, y, cloudWater, temperature, updraft);
-            iceContent[y][x] = microphysics.ice;
+            const updraft = state.thermalStrength[y][x] * 2;
+            const microphysics = calculateCloudMicrophysics(x, y, state.cloudWater, state.temperature, updraft);
+            state.iceContent[y][x] = microphysics.ice;
             
             if (precipRate > 0) {
                  if (precip.type === PRECIP_TYPES.SNOW) {
                     const snowAccumulation = precipRate * 10 * timeFactor;
-                    snowDepth[y][x] += snowAccumulation;
-                    latentHeatEffect[y][x] += precipRate * 0.8;
+                    state.snowDepth[y][x] += snowAccumulation;
+                    state.latentHeatEffect[y][x] += precipRate * 0.8;
                 } else {
                     const thermalProps = getThermalProperties(x, y);
-                    const infiltration = Math.min(precipRate * timeFactor, 1 - soilMoisture[y][x]);
-                    soilMoisture[y][x] += infiltration * thermalProps.waterRetention;
+                    const infiltration = Math.min(precipRate * timeFactor, 1 - state.soilMoisture[y][x]);
+                    state.soilMoisture[y][x] += infiltration * thermalProps.waterRetention;
                 }
             }
         }
@@ -512,7 +444,7 @@ function updateCloudDynamics(hour: number, windSpeed: number, windDir: number, t
 }
 
 function smoothCloudFields() {
-    const smoothed = cloudCoverage.map(row => [...row]);
+    const smoothed = state.cloudCoverage.map(row => [...row]);
     
     for (let y = 1; y < GRID_SIZE - 1; y++) {
         for (let x = 1; x < GRID_SIZE - 1; x++) {
@@ -521,7 +453,7 @@ function smoothCloudFields() {
             
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
-                    sum += cloudCoverage[y + dy][x + dx];
+                    sum += state.cloudCoverage[y + dy][x + dx];
                     count++;
                 }
             }
@@ -530,7 +462,7 @@ function smoothCloudFields() {
         }
     }
     
-    cloudCoverage = smoothed;
+    state.cloudCoverage = smoothed;
 }
 
 
@@ -538,18 +470,18 @@ function smoothCloudFields() {
 function updateSnowCover(temperatureGrid: number[][], sunAltitude: number, timeFactor: number) {
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            if (snowDepth[y][x] > 0) {
+            if (state.snowDepth[y][x] > 0) {
                 if (temperatureGrid[y][x] > 0) {
                     const meltRate = (temperatureGrid[y][x] * 0.5 + sunAltitude * 2.0);
                     const latentCooling = -Math.min(temperatureGrid[y][x], meltRate * 0.15);
                     temperatureGrid[y][x] += latentCooling;
-                    snowDepth[y][x] = Math.max(0, snowDepth[y][x] - meltRate * timeFactor);
-                    const meltwater = Math.min(meltRate * timeFactor / 10, 1 - soilMoisture[y][x]);
-                    soilMoisture[y][x] += meltwater;
+                    state.snowDepth[y][x] = Math.max(0, state.snowDepth[y][x] - meltRate * timeFactor);
+                    const meltwater = Math.min(meltRate * timeFactor / 10, 1 - state.soilMoisture[y][x]);
+                    state.soilMoisture[y][x] += meltwater;
 
                 }
                 if (sunAltitude > 0) {
-                     snowDepth[y][x] = Math.max(0, snowDepth[y][x] - sunAltitude * 0.05 * timeFactor);
+                     state.snowDepth[y][x] = Math.max(0, state.snowDepth[y][x] - sunAltitude * 0.05 * timeFactor);
                 }
             }
         }
@@ -557,15 +489,15 @@ function updateSnowCover(temperatureGrid: number[][], sunAltitude: number, timeF
 }
 
 function calculateSnowEffects(x: number, y: number, sunAltitude: number): { albedoEffect: number, insulationEffect: number } {
-    if (snowDepth[y][x] <= 0) {
+    if (state.snowDepth[y][x] <= 0) {
         return { albedoEffect: 0, insulationEffect: 0 };
     }
 
     const snowAlbedo = 0.8;
-    const effectiveAlbedo = snowAlbedo * Math.min(1, snowDepth[y][x] / 10);
+    const effectiveAlbedo = snowAlbedo * Math.min(1, state.snowDepth[y][x] / 10);
     const albedoCooling = -effectiveAlbedo * sunAltitude * SOLAR_INTENSITY_FACTOR * 1.5;
 
-    const insulationFactor = Math.min(1, snowDepth[y][x] / 20);
+    const insulationFactor = Math.min(1, state.snowDepth[y][x] / 20);
 
     return { albedoEffect: albedoCooling, insulationEffect: insulationFactor };
 }
@@ -578,36 +510,36 @@ function initializeSoilMoisture(): void {
             const thermalProps = getThermalProperties(x, y);
             let baseMoisture = thermalProps.waterRetention * 0.5;
             
-            if (waterDistance[y][x] < 10) {
-                baseMoisture += (10 - waterDistance[y][x]) / 10 * 0.3;
+            if (state.waterDistance[y][x] < 10) {
+                baseMoisture += (10 - state.waterDistance[y][x]) / 10 * 0.3;
             }
             
             if (isInBounds(x-1, y-1) && isInBounds(x+1, y+1)) {
-                const slope = Math.abs(elevation[y][x] - elevation[y-1][x]) + 
-                             Math.abs(elevation[y][x] - elevation[y+1][x]);
+                const slope = Math.abs(state.elevation[y][x] - state.elevation[y-1][x]) + 
+                             Math.abs(state.elevation[y][x] - state.elevation[y+1][x]);
                 if (slope > 20) {
                     baseMoisture *= 0.7;
                 }
             }
             
-            soilMoisture[y][x] = Math.min(1, baseMoisture);
+            state.soilMoisture[y][x] = Math.min(1, baseMoisture);
         }
     }
 }
 
 // ===== DOWNSLOPE WIND CALCULATIONS =====
 function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: number, windGustiness: number): void {
-    downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
-    foehnEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
+    state.foehnEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     
     const isNightTime = hour <= 6 || hour >= 19;
     const windDirRad = windDir * Math.PI / 180;
     
     for (let y = 2; y < GRID_SIZE - 2; y++) {
         for (let x = 2; x < GRID_SIZE - 2; x++) {
-            const dzdx = (elevation[y][x + 2] - elevation[y][x - 2]) / (4 * CELL_SIZE);
-            const dzdy = (elevation[y + 2][x] - elevation[y - 2][x]) / (4 * CELL_SIZE);
+            const dzdx = (state.elevation[y][x + 2] - state.elevation[y][x - 2]) / (4 * CELL_SIZE);
+            const dzdy = (state.elevation[y + 2][x] - state.elevation[y - 2][x]) / (4 * CELL_SIZE);
             
             const slope = Math.sqrt(dzdx * dzdx + dzdy * dzdy);
             const slopeAngle = Math.atan(slope);
@@ -620,7 +552,7 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                     const checkX = Math.round(x - dzdx * d);
                     const checkY = Math.round(y - dzdy * d);
                     if (isInBounds(checkX, checkY)) {
-                        const elevDiff = Math.abs(elevation[checkY][checkX] - elevation[y][x]);
+                        const elevDiff = Math.abs(state.elevation[checkY][checkX] - state.elevation[y][x]);
                         if (elevDiff > 30) {
                             isSurfaceSlope = false;
                             break;
@@ -631,10 +563,10 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                 if (isSurfaceSlope) {
                     const coldAirFlow = katabaticStrength * 0.8;
                     if (slope > EPSILON) {
-                        windVectorField[y][x].x = -dzdx / slope * coldAirFlow * 5;
-                        windVectorField[y][x].y = -dzdy / slope * coldAirFlow * 5;
-                        windVectorField[y][x].speed = coldAirFlow * 5;
-                        downSlopeWinds[y][x] = -coldAirFlow * 1.5;
+                        state.windVectorField[y][x].x = -dzdx / slope * coldAirFlow * 5;
+                        state.windVectorField[y][x].y = -dzdy / slope * coldAirFlow * 5;
+                        state.windVectorField[y][x].speed = coldAirFlow * 5;
+                        state.downSlopeWinds[y][x] = -coldAirFlow * 1.5;
                     }
                 }
             }
@@ -644,31 +576,31 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                 const windY = -Math.cos(windDirRad);
                 
                 let isLeeSide = false;
-                let maxUpwindHeight = elevation[y][x];
+                let maxUpwindHeight = state.elevation[y][x];
                 
                 for (let d = 1; d <= 10; d++) {
                     const checkX = Math.round(x - windX * d);
                     const checkY = Math.round(y - windY * d);
                     
                     if (isInBounds(checkX, checkY)) {
-                        if (elevation[checkY][checkX] > maxUpwindHeight + 20) {
+                        if (state.elevation[checkY][checkX] > maxUpwindHeight + 20) {
                             isLeeSide = true;
-                            maxUpwindHeight = elevation[checkY][checkX];
+                            maxUpwindHeight = state.elevation[checkY][checkX];
                         }
                     }
                 }
                 
                 if (isLeeSide) {
-                    const descentHeight = maxUpwindHeight - elevation[y][x];
+                    const descentHeight = maxUpwindHeight - state.elevation[y][x];
                     const adiabaticWarming = descentHeight * 0.01;
                     const foehnStrength = Math.min(1, descentHeight / 100) * (baseWindSpeed / 30);
-                    foehnEffect[y][x] = Math.min(12, adiabaticWarming * foehnStrength);
+                    state.foehnEffect[y][x] = Math.min(12, adiabaticWarming * foehnStrength);
                     
-                    windVectorField[y][x].x += windX * foehnStrength * 10;
-                    windVectorField[y][x].y += windY * foehnStrength * 10;
-                    windVectorField[y][x].speed = Math.sqrt(
-                        windVectorField[y][x].x * windVectorField[y][x].x + 
-                        windVectorField[y][x].y * windVectorField[y][x].y
+                    state.windVectorField[y][x].x += windX * foehnStrength * 10;
+                    state.windVectorField[y][x].y += windY * foehnStrength * 10;
+                    state.windVectorField[y][x].speed = Math.sqrt(
+                        state.windVectorField[y][x].x * state.windVectorField[y][x].x + 
+                        state.windVectorField[y][x].y * state.windVectorField[y][x].y
                     );
                 }
             }
@@ -680,7 +612,7 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx;
                     const ny = y + dy;
-                    if (isInBounds(nx, ny) && elevation[ny][nx] > elevation[y][x] + 25) {
+                    if (isInBounds(nx, ny) && state.elevation[ny][nx] > state.elevation[y][x] + 25) {
                         higherNeighbors++;
                     }
                 }
@@ -693,7 +625,7 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                     const nx = Math.round(x + valleyCheckRadius * Math.cos(angle));
                     const ny = Math.round(y + valleyCheckRadius * Math.sin(angle));
                     if (isInBounds(nx, ny)) {
-                        exits.push({ elev: elevation[ny][nx], x: nx, y: ny });
+                        exits.push({ elev: state.elevation[ny][nx], x: nx, y: ny });
                     }
                 }
                 exits.sort((a, b) => a.elev - b.elev);
@@ -727,7 +659,7 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                         for (let d = 1; d < 15; d++) {
                             const checkX = Math.round(x + perpVec.x * d * sign);
                             const checkY = Math.round(y + perpVec.y * d * sign);
-                            if (!isInBounds(checkX, checkY) || elevation[checkY][checkX] > elevation[y][x] + 30) {
+                            if (!isInBounds(checkX, checkY) || state.elevation[checkY][checkX] > state.elevation[y][x] + 30) {
                                 valleyWidth += d; break;
                             }
                             if (d === 14) valleyWidth += d;
@@ -752,8 +684,8 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                     const blendedVecX = (windX * (1 - channelStrength)) + (channeledVecX * channelStrength);
                     const blendedVecY = (windY * (1 - channelStrength)) + (channeledVecY * channelStrength);
                     
-                    windVectorField[y][x].x += blendedVecX * finalValleySpeed * 0.8;
-                    windVectorField[y][x].y += blendedVecY * finalValleySpeed * 0.8;
+                    state.windVectorField[y][x].x += blendedVecX * finalValleySpeed * 0.8;
+                    state.windVectorField[y][x].y += blendedVecY * finalValleySpeed * 0.8;
                 }
             }
         }
@@ -767,7 +699,7 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                 let elevSqSum = 0;
                 for (let dy = -1; dy <= 1; dy++) {
                     for (let dx = -1; dx <= 1; dx++) {
-                        const elev = elevation[y+dy][x+dx];
+                        const elev = state.elevation[y+dy][x+dx];
                         elevSum += elev;
                         elevSqSum += elev * elev;
                     }
@@ -776,21 +708,21 @@ function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: n
                 const stdDev = Math.sqrt(elevSqSum / 9 - avgElev * avgElev);
                 roughness = stdDev / 20;
 
-                const thermalTurbulence = (thermalStrength[y][x] || 0) / 15;
+                const thermalTurbulence = (state.thermalStrength[y][x] || 0) / 15;
 
                 const gustFactor = (windGustiness / 100) * (1 + roughness + thermalTurbulence);
-                const localWindSpeed = Math.sqrt(windVectorField[y][x].x**2 + windVectorField[y][x].y**2) + baseWindSpeed;
+                const localWindSpeed = Math.sqrt(state.windVectorField[y][x].x**2 + state.windVectorField[y][x].y**2) + baseWindSpeed;
                 const gustMagnitude = localWindSpeed * gustFactor * 0.5;
 
-                windVectorField[y][x].x += (Math.random() - 0.5) * 2 * gustMagnitude;
-                windVectorField[y][x].y += (Math.random() - 0.5) * 2 * gustMagnitude;
+                state.windVectorField[y][x].x += (Math.random() - 0.5) * 2 * gustMagnitude;
+                state.windVectorField[y][x].y += (Math.random() - 0.5) * 2 * gustMagnitude;
             }
         }
     }
     
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const vec = windVectorField[y][x];
+            const vec = state.windVectorField[y][x];
             vec.speed = Math.sqrt(vec.x * vec.x + vec.y * vec.y);
         }
     }
@@ -810,8 +742,8 @@ function smoothWindField(): void {
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     const weight = (dx === 0 && dy === 0) ? 4 : 1;
-                    sumX += windVectorField[y + dy][x + dx].x * weight;
-                    sumY += windVectorField[y + dy][x + dx].y * weight;
+                    sumX += state.windVectorField[y + dy][x + dx].x * weight;
+                    sumY += state.windVectorField[y + dy][x + dx].y * weight;
                     count += weight;
                 }
             }
@@ -824,7 +756,7 @@ function smoothWindField(): void {
     
     for (let y = 1; y < GRID_SIZE - 1; y++) {
         for (let x = 1; x < GRID_SIZE - 1; x++) {
-            windVectorField[y][x] = smoothed[y][x];
+            state.windVectorField[y][x] = smoothed[y][x];
         }
     }
 }
@@ -841,28 +773,28 @@ function updateFogSimulation(hour: number, sunAltitude: number, timeFactor: numb
             let formationRate = 0;
             let dissipationRate = 0;
 
-            if (inversionStrength > 0 && elevation[y][x] < inversionHeight) {
-                const depth = (inversionHeight - elevation[y][x]) / 100;
-                formationRate += inversionStrength * depth * 0.5;
+            if (state.inversionStrength > 0 && state.elevation[y][x] < state.inversionHeight) {
+                const depth = (state.inversionHeight - state.elevation[y][x]) / 100;
+                formationRate += state.inversionStrength * depth * 0.5;
             }
 
-            if (temperature[y][x] < dewPoint[y][x] + 2) {
-                const saturation = (dewPoint[y][x] + 2 - temperature[y][x]) / 4;
-                formationRate += saturation * humidity[y][x];
+            if (state.temperature[y][x] < state.dewPoint[y][x] + 2) {
+                const saturation = (state.dewPoint[y][x] + 2 - state.temperature[y][x]) / 4;
+                formationRate += saturation * state.humidity[y][x];
             }
             
-            if (sunAltitude <= 0 && waterDistance[y][x] < 5) {
-                formationRate += (5 - waterDistance[y][x]) / 5 * 0.3 * (1 - windVectorField[y][x].speed / 20);
+            if (sunAltitude <= 0 && state.waterDistance[y][x] < 5) {
+                formationRate += (5 - state.waterDistance[y][x]) / 5 * 0.3 * (1 - state.windVectorField[y][x].speed / 20);
             }
 
             if (sunAltitude > 0) {
                 dissipationRate += sunAltitude * FOG_SUN_DISSIPATION;
             }
 
-            dissipationRate += windVectorField[y][x].speed * FOG_WIND_DISSIPATION;
+            dissipationRate += state.windVectorField[y][x].speed * FOG_WIND_DISSIPATION;
             
-            if (temperature[y][x] > dewPoint[y][x]) {
-                dissipationRate += (temperature[y][x] - dewPoint[y][x]) * FOG_TEMP_DISSIPATION;
+            if (state.temperature[y][x] > state.dewPoint[y][x]) {
+                dissipationRate += (state.temperature[y][x] - state.dewPoint[y][x]) * FOG_TEMP_DISSIPATION;
             }
 
             fogChangeRate[y][x] = formationRate - dissipationRate;
@@ -870,18 +802,18 @@ function updateFogSimulation(hour: number, sunAltitude: number, timeFactor: numb
     }
     
     // Step 2: Apply changes and advection
-    let newFogDensity = fogDensity.map(row => [...row]);
+    let newFogDensity = state.fogDensity.map(row => [...row]);
     for (let y = 1; y < GRID_SIZE - 1; y++) {
         for (let x = 1; x < GRID_SIZE - 1; x++) {
             // Apply local formation/dissipation
             newFogDensity[y][x] += fogChangeRate[y][x] * timeFactor;
 
             // Advection
-            const wind = windVectorField[y][x];
+            const wind = state.windVectorField[y][x];
             if (wind.speed > 0.5) {
                 const upwindX = clamp(Math.round(x - wind.x * 0.2), 0, GRID_SIZE - 1);
                 const upwindY = clamp(Math.round(y - wind.y * 0.2), 0, GRID_SIZE - 1);
-                const advectionChange = (fogDensity[upwindY][upwindX] - fogDensity[y][x]) * FOG_ADVECTION_RATE * Math.min(1, wind.speed / 10);
+                const advectionChange = (state.fogDensity[upwindY][upwindX] - state.fogDensity[y][x]) * FOG_ADVECTION_RATE * Math.min(1, wind.speed / 10);
                 newFogDensity[y][x] += advectionChange * timeFactor;
             }
             
@@ -893,32 +825,32 @@ function updateFogSimulation(hour: number, sunAltitude: number, timeFactor: numb
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx;
                     const ny = y + dy;
-                    const elevDiff = elevation[ny][nx] - elevation[y][x];
+                    const elevDiff = state.elevation[ny][nx] - state.elevation[y][x];
                     if (elevDiff > 0) {
-                        highNeighborFog += fogDensity[ny][nx] * elevDiff;
+                        highNeighborFog += state.fogDensity[ny][nx] * elevDiff;
                         elevDiffSum += elevDiff;
                     }
                 }
             }
             if (elevDiffSum > 0) {
                 const avgHighNeighborFog = highNeighborFog / elevDiffSum;
-                const downslopeChange = (avgHighNeighborFog - fogDensity[y][x]) * FOG_DOWNSLOPE_RATE;
+                const downslopeChange = (avgHighNeighborFog - state.fogDensity[y][x]) * FOG_DOWNSLOPE_RATE;
                 newFogDensity[y][x] += downslopeChange * timeFactor;
             }
 
             // Diffusion
             const avgNeighborFog = (
-                fogDensity[y - 1][x] + fogDensity[y + 1][x] +
-                fogDensity[y][x - 1] + fogDensity[y][x + 1]
+                state.fogDensity[y - 1][x] + state.fogDensity[y + 1][x] +
+                state.fogDensity[y][x - 1] + state.fogDensity[y][x + 1]
             ) / 4;
-            const diffusionChange = (avgNeighborFog - fogDensity[y][x]) * FOG_DIFFUSION_RATE;
+            const diffusionChange = (avgNeighborFog - state.fogDensity[y][x]) * FOG_DIFFUSION_RATE;
             newFogDensity[y][x] += diffusionChange * timeFactor;
         }
     }
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            fogDensity[y][x] = clamp(newFogDensity[y][x], 0, 1);
+            state.fogDensity[y][x] = clamp(newFogDensity[y][x], 0, 1);
         }
     }
 }
@@ -929,8 +861,8 @@ function calculateInversionLayer(hour: number, windSpeed: number, cloudCover = 0
     const isNightTime = hour <= 6 || hour >= 19;
     
     if (!isNightTime || windSpeed > 15 || cloudCover > 0.5) {
-        inversionHeight = 0;
-        inversionStrength = 0;
+        state.inversionHeight = 0;
+        state.inversionStrength = 0;
         return;
     }
     
@@ -941,7 +873,7 @@ function calculateInversionLayer(hour: number, windSpeed: number, cloudCover = 0
     
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const elev = elevation[y][x];
+            const elev = state.elevation[y][x];
             minElev = Math.min(minElev, elev);
             maxElev = Math.max(maxElev, elev);
             
@@ -958,20 +890,20 @@ function calculateInversionLayer(hour: number, windSpeed: number, cloudCover = 0
     const windFactor = Math.max(0, 1 - windSpeed / 15);
     const hourFactor = hour <= 6 ? (6 - hour) / 6 : (hour - 19) / 5;
     
-    inversionHeight = valleyAvgElev + 50 + (200 * windFactor * hourFactor);
-    inversionStrength = windFactor * hourFactor * Math.min(1, terrainRelief / 100);
+    state.inversionHeight = valleyAvgElev + 50 + (200 * windFactor * hourFactor);
+    state.inversionStrength = windFactor * hourFactor * Math.min(1, terrainRelief / 100);
     
-    inversionHeight = Math.min(inversionHeight, valleyAvgElev + 300);
+    state.inversionHeight = Math.min(state.inversionHeight, valleyAvgElev + 300);
     
     if (windSpeed > 10 || terrainRelief < 30) {
-        inversionStrength *= 0.5;
+        state.inversionStrength *= 0.5;
     }
 }
 
 // ===== AREA AND DISTANCE CALCULATIONS =====
 function calculateContiguousAreas(): void {
-    contiguousAreas = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    areasizes = new Map();
+    state.contiguousAreas = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.areasizes = new Map();
     let areaId = 0;
     const visited = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
     
@@ -984,7 +916,7 @@ function calculateContiguousAreas(): void {
         while (queue.length > 0) {
             const [x, y] = queue.shift()!;
             cells.push([x, y]);
-            contiguousAreas[y][x] = areaId;
+            state.contiguousAreas[y][x] = areaId;
             
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
@@ -992,7 +924,7 @@ function calculateContiguousAreas(): void {
                     const nx = x + dx;
                     const ny = y + dy;
                     
-                    if (isInBounds(nx, ny) && !visited[ny][nx] && landCover[ny][nx] === landType) {
+                    if (isInBounds(nx, ny) && !visited[ny][nx] && state.landCover[ny][nx] === landType) {
                         visited[ny][nx] = true;
                         queue.push([nx, ny]);
                     }
@@ -1000,26 +932,26 @@ function calculateContiguousAreas(): void {
             }
         }
         
-        areasizes.set(areaId, cells.length);
+        state.areasizes.set(areaId, cells.length);
         return cells;
     }
     
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
             if (!visited[y][x]) {
-                floodFill(x, y, landCover[y][x]);
+                floodFill(x, y, state.landCover[y][x]);
             }
         }
     }
 }
 
 function calculateDistanceFields(): void {
-    waterDistance = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-    nearestWaterAreaId = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    forestDistance = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-    nearestForestAreaId = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    urbanDistance = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-    forestDepth = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.waterDistance = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
+    state.nearestWaterAreaId = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.forestDistance = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
+    state.nearestForestAreaId = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.urbanDistance = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
+    state.forestDepth = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
 
     const waterQueue: [number, number, number, number][] = [];
     const forestQueue: [number, number, number, number][] = [];
@@ -1027,19 +959,19 @@ function calculateDistanceFields(): void {
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const areaId = contiguousAreas[y][x];
-            if (landCover[y][x] === LAND_TYPES.WATER) {
-                waterDistance[y][x] = 0;
-                nearestWaterAreaId[y][x] = areaId;
+            const areaId = state.contiguousAreas[y][x];
+            if (state.landCover[y][x] === LAND_TYPES.WATER) {
+                state.waterDistance[y][x] = 0;
+                state.nearestWaterAreaId[y][x] = areaId;
                 waterQueue.push([x, y, 0, areaId]);
             }
-            if (landCover[y][x] === LAND_TYPES.FOREST) {
-                forestDistance[y][x] = 0;
-                nearestForestAreaId[y][x] = areaId;
+            if (state.landCover[y][x] === LAND_TYPES.FOREST) {
+                state.forestDistance[y][x] = 0;
+                state.nearestForestAreaId[y][x] = areaId;
                 forestQueue.push([x, y, 0, areaId]);
             }
-            if (landCover[y][x] === LAND_TYPES.URBAN || landCover[y][x] === LAND_TYPES.SETTLEMENT) {
-                urbanDistance[y][x] = 0;
+            if (state.landCover[y][x] === LAND_TYPES.URBAN || state.landCover[y][x] === LAND_TYPES.SETTLEMENT) {
+                state.urbanDistance[y][x] = 0;
                 urbanQueue.push([x, y, 0]);
             }
         }
@@ -1053,9 +985,9 @@ function calculateDistanceFields(): void {
                 const nx = x + dx;
                 const ny = y + dy;
                 const newDist = dist + Math.sqrt(dx * dx + dy * dy);
-                if (isInBounds(nx, ny) && newDist < waterDistance[ny][nx]) {
-                    waterDistance[ny][nx] = newDist;
-                    nearestWaterAreaId[ny][nx] = areaId;
+                if (isInBounds(nx, ny) && newDist < state.waterDistance[ny][nx]) {
+                    state.waterDistance[ny][nx] = newDist;
+                    state.nearestWaterAreaId[ny][nx] = areaId;
                     waterQueue.push([nx, ny, newDist, areaId]);
                 }
             }
@@ -1070,9 +1002,9 @@ function calculateDistanceFields(): void {
                 const nx = x + dx;
                 const ny = y + dy;
                 const newDist = dist + Math.sqrt(dx * dx + dy * dy);
-                if (isInBounds(nx, ny) && newDist < forestDistance[ny][nx]) {
-                    forestDistance[ny][nx] = newDist;
-                    nearestForestAreaId[ny][nx] = areaId;
+                if (isInBounds(nx, ny) && newDist < state.forestDistance[ny][nx]) {
+                    state.forestDistance[ny][nx] = newDist;
+                    state.nearestForestAreaId[ny][nx] = areaId;
                     forestQueue.push([nx, ny, newDist, areaId]);
                 }
             }
@@ -1087,8 +1019,8 @@ function calculateDistanceFields(): void {
                 const nx = x + dx;
                 const ny = y + dy;
                 const newDist = dist + Math.sqrt(dx * dx + dy * dy);
-                if (isInBounds(nx, ny) && newDist < urbanDistance[ny][nx]) {
-                    urbanDistance[ny][nx] = newDist;
+                if (isInBounds(nx, ny) && newDist < state.urbanDistance[ny][nx]) {
+                    state.urbanDistance[ny][nx] = newDist;
                     urbanQueue.push([nx, ny, newDist]);
                 }
             }
@@ -1097,7 +1029,7 @@ function calculateDistanceFields(): void {
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            if (landCover[y][x] === LAND_TYPES.FOREST) {
+            if (state.landCover[y][x] === LAND_TYPES.FOREST) {
                 let minDistToEdge = Infinity;
                 for (let radius = 1; radius < 20; radius++) {
                     let foundEdge = false;
@@ -1106,7 +1038,7 @@ function calculateDistanceFields(): void {
                             if (Math.abs(dx) === radius || Math.abs(dy) === radius) {
                                 const nx = x + dx;
                                 const ny = y + dy;
-                                if (isInBounds(nx, ny) && landCover[ny][nx] !== LAND_TYPES.FOREST) {
+                                if (isInBounds(nx, ny) && state.landCover[ny][nx] !== LAND_TYPES.FOREST) {
                                     const d = Math.sqrt(dx * dx + dy * dy);
                                     minDistToEdge = Math.min(minDistToEdge, d);
                                     foundEdge = true;
@@ -1116,7 +1048,7 @@ function calculateDistanceFields(): void {
                     }
                     if (foundEdge) break;
                 }
-                forestDepth[y][x] = minDistToEdge === Infinity ? 20 : minDistToEdge;
+                state.forestDepth[y][x] = minDistToEdge === Infinity ? 20 : minDistToEdge;
             }
         }
     }
@@ -1143,53 +1075,53 @@ function generatePerlinNoise(): number[][] {
 }
 
 function initializeGrids(): void {
-    elevation = generatePerlinNoise();
+    state.elevation = generatePerlinNoise();
     
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            landCover[y][x] = LAND_TYPES.GRASSLAND;
+            state.landCover[y][x] = LAND_TYPES.GRASSLAND;
             
-            if (elevation[y][x] > 140) {
-                soilType[y][x] = SOIL_TYPES.ROCK;
-            } else if (elevation[y][x] < 80) {
-                soilType[y][x] = Math.random() > 0.5 ? SOIL_TYPES.CLAY : SOIL_TYPES.LOAM;
+            if (state.elevation[y][x] > 140) {
+                state.soilType[y][x] = SOIL_TYPES.ROCK;
+            } else if (state.elevation[y][x] < 80) {
+                state.soilType[y][x] = Math.random() > 0.5 ? SOIL_TYPES.CLAY : SOIL_TYPES.LOAM;
             } else {
                 const rand = Math.random();
-                if (rand < 0.4) soilType[y][x] = SOIL_TYPES.LOAM;
-                else if (rand < 0.7) soilType[y][x] = SOIL_TYPES.SAND;
-                else soilType[y][x] = SOIL_TYPES.CLAY;
+                if (rand < 0.4) state.soilType[y][x] = SOIL_TYPES.LOAM;
+                else if (rand < 0.7) state.soilType[y][x] = SOIL_TYPES.SAND;
+                else state.soilType[y][x] = SOIL_TYPES.CLAY;
             }
             
-            temperature[y][x] = 20;
-            hillshade[y][x] = 1;
-            waterDistance[y][x] = Infinity;
-            nearestWaterAreaId[y][x] = 0;
-            forestDistance[y][x] = Infinity;
-            nearestForestAreaId[y][x] = 0;
-            forestDepth[y][x] = 0;
-            urbanDistance[y][x] = Infinity;
-            contiguousAreas[y][x] = 0;
-            fogDensity[y][x] = 0;
-            downSlopeWinds[y][x] = 0;
-            windVectorField[y][x] = {x: 0, y: 0, speed: 0};
-            foehnEffect[y][x] = 0;
-            soilMoisture[y][x] = 0;
-            soilTemperature[y][x] = 20;
-            snowDepth[y][x] = 0;
-            cloudCoverage[y][x] = 0;
-            cloudBase[y][x] = 0;
-            cloudTop[y][x] = 0;
-            cloudType[y][x] = CLOUD_TYPES.NONE;
-            cloudOpticalDepth[y][x] = 0;
-            precipitation[y][x] = 0;
-            precipitationType[y][x] = PRECIP_TYPES.NONE;
-            humidity[y][x] = 0.5 + Math.random() * 0.2;
-            dewPoint[y][x] = 10;
-            convectiveEnergy[y][x] = 0;
-            thermalStrength[y][x] = 0;
-            cloudWater[y][x] = 0;
-            iceContent[y][x] = 0;
-            latentHeatEffect[y][x] = 0;
+            state.temperature[y][x] = 20;
+            state.hillshade[y][x] = 1;
+            state.waterDistance[y][x] = Infinity;
+            state.nearestWaterAreaId[y][x] = 0;
+            state.forestDistance[y][x] = Infinity;
+            state.nearestForestAreaId[y][x] = 0;
+            state.forestDepth[y][x] = 0;
+            state.urbanDistance[y][x] = Infinity;
+            state.contiguousAreas[y][x] = 0;
+            state.fogDensity[y][x] = 0;
+            state.downSlopeWinds[y][x] = 0;
+            state.windVectorField[y][x] = {x: 0, y: 0, speed: 0};
+            state.foehnEffect[y][x] = 0;
+            state.soilMoisture[y][x] = 0;
+            state.soilTemperature[y][x] = 20;
+            state.snowDepth[y][x] = 0;
+            state.cloudCoverage[y][x] = 0;
+            state.cloudBase[y][x] = 0;
+            state.cloudTop[y][x] = 0;
+            state.cloudType[y][x] = CLOUD_TYPES.NONE;
+            state.cloudOpticalDepth[y][x] = 0;
+            state.precipitation[y][x] = 0;
+            state.precipitationType[y][x] = PRECIP_TYPES.NONE;
+            state.humidity[y][x] = 0.5 + Math.random() * 0.2;
+            state.dewPoint[y][x] = 10;
+            state.convectiveEnergy[y][x] = 0;
+            state.thermalStrength[y][x] = 0;
+            state.cloudWater[y][x] = 0;
+            state.iceContent[y][x] = 0;
+            state.latentHeatEffect[y][x] = 0;
         }
     }
     
@@ -1207,9 +1139,9 @@ function addInitialFeatures(): void {
         for (let y = 40; y <= 50; y++) {
             const ridgeHeight = 800 + Math.sin(x / 10) * 200;
             const distFromRidge = Math.abs(y - 45);
-            elevation[y][x] = ridgeHeight - distFromRidge * 80;
-            if (elevation[y][x] > 800) {
-                soilType[y][x] = SOIL_TYPES.ROCK;
+            state.elevation[y][x] = ridgeHeight - distFromRidge * 80;
+            if (state.elevation[y][x] > 800) {
+                state.soilType[y][x] = SOIL_TYPES.ROCK;
             }
         }
     }
@@ -1217,9 +1149,9 @@ function addInitialFeatures(): void {
     for (let y = 10; y < 30; y++) {
         for (let x = 10; x < 90; x++) {
             const distFromCenter = Math.abs(y - 20);
-            elevation[y][x] = Math.max(60, elevation[y][x] - (10 - distFromCenter) * 5);
-            if (elevation[y][x] < 80) {
-                soilType[y][x] = SOIL_TYPES.CLAY;
+            state.elevation[y][x] = Math.max(60, state.elevation[y][x] - (10 - distFromCenter) * 5);
+            if (state.elevation[y][x] < 80) {
+                state.soilType[y][x] = SOIL_TYPES.CLAY;
             }
         }
     }
@@ -1228,14 +1160,14 @@ function addInitialFeatures(): void {
         for (let x = 10; x < 90; x++) {
             const ridgeHeight = 800 + Math.sin(x / 10) * 200;
             const mountainBaseHeight = ridgeHeight - 5 * 80;
-            elevation[y][x] = Math.max(80, mountainBaseHeight - (y - 50) * 12);
+            state.elevation[y][x] = Math.max(80, mountainBaseHeight - (y - 50) * 12);
         }
     }
     
     for (let y = 65; y < 80; y++) {
         for (let x = 30; x < 60; x++) {
             if (Math.random() > 0.3) {
-                soilType[y][x] = SOIL_TYPES.SAND;
+                state.soilType[y][x] = SOIL_TYPES.SAND;
             }
         }
     }
@@ -1244,8 +1176,8 @@ function addInitialFeatures(): void {
     for (let y = lakeY - lakeRadius; y <= lakeY + lakeRadius; y++) {
         for (let x = lakeX - lakeRadius; x <= lakeX + lakeRadius; x++) {
             if (isInBounds(x, y) && distance(x, y, lakeX, lakeY) < lakeRadius) {
-                landCover[y][x] = LAND_TYPES.WATER;
-                elevation[y][x] = 65;
+                state.landCover[y][x] = LAND_TYPES.WATER;
+                state.elevation[y][x] = 65;
             }
         }
     }
@@ -1253,8 +1185,8 @@ function addInitialFeatures(): void {
     for (let y = 30; y < 45; y++) {
         for (let x = 20; x < 80; x++) {
             if (isInBounds(x, y) && Math.random() > 0.3) {
-                landCover[y][x] = LAND_TYPES.FOREST;
-                soilType[y][x] = SOIL_TYPES.LOAM;
+                state.landCover[y][x] = LAND_TYPES.FOREST;
+                state.soilType[y][x] = SOIL_TYPES.LOAM;
             }
         }
     }
@@ -1263,7 +1195,7 @@ function addInitialFeatures(): void {
     for (let y = urbanY - urbanRadius; y <= urbanY + urbanRadius; y++) {
         for (let x = urbanX - urbanRadius; x <= urbanX + urbanRadius; x++) {
             if (isInBounds(x, y) && Math.abs(x - urbanX) + Math.abs(y - urbanY) < urbanRadius) {
-                landCover[y][x] = LAND_TYPES.SETTLEMENT;
+                state.landCover[y][x] = LAND_TYPES.SETTLEMENT;
             }
         }
     }
@@ -1276,8 +1208,8 @@ function calculateHillshade(): void {
     
     for (let y = 1; y < GRID_SIZE - 1; y++) {
         for (let x = 1; x < GRID_SIZE - 1; x++) {
-            const dzdx = (elevation[y][x + 1] - elevation[y][x - 1]) / (2 * CELL_SIZE);
-            const dzdy = (elevation[y + 1][x] - elevation[y - 1][x]) / (2 * CELL_SIZE);
+            const dzdx = (state.elevation[y][x + 1] - state.elevation[y][x - 1]) / (2 * CELL_SIZE);
+            const dzdy = (state.elevation[y + 1][x] - state.elevation[y - 1][x]) / (2 * CELL_SIZE);
             
             const slope = Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy));
             const aspect = Math.atan2(dzdy, dzdx);
@@ -1286,7 +1218,7 @@ function calculateHillshade(): void {
                          Math.sin(sunAltitude) * Math.sin(slope) * 
                          Math.cos(sunAzimuth - aspect);
             
-            hillshade[y][x] = clamp(shade, 0, 1);
+            state.hillshade[y][x] = clamp(shade, 0, 1);
         }
     }
 }
@@ -1312,8 +1244,8 @@ function calculateSolarInsolation(x: number, y: number, sunAltitude: number): nu
         return 0;
     }
     
-    const dzdx = (elevation[y][x + 1] - elevation[y][x - 1]) / (2 * CELL_SIZE);
-    const dzdy = (elevation[y + 1][x] - elevation[y - 1][x]) / (2 * CELL_SIZE);
+    const dzdx = (state.elevation[y][x + 1] - state.elevation[y][x - 1]) / (2 * CELL_SIZE);
+    const dzdy = (state.elevation[y + 1][x] - state.elevation[y - 1][x]) / (2 * CELL_SIZE);
     
     const slope = Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy));
     const aspect = Math.atan2(-dzdy, dzdx);
@@ -1324,8 +1256,8 @@ function calculateSolarInsolation(x: number, y: number, sunAltitude: number): nu
     );
     
     let cloudReduction = 1;
-    if (cloudCoverage && cloudCoverage[y] && cloudCoverage[y][x] > 0) {
-        const cloudRadiation = calculateCloudRadiation(x, y, cloudCoverage, cloudOpticalDepth, sunAltitude);
+    if (state.cloudCoverage && state.cloudCoverage[y] && state.cloudCoverage[y][x] > 0) {
+        const cloudRadiation = calculateCloudRadiation(x, y, state.cloudCoverage, state.cloudOpticalDepth, sunAltitude);
         cloudReduction = cloudRadiation.solarTransmission;
     }
     
@@ -1334,32 +1266,32 @@ function calculateSolarInsolation(x: number, y: number, sunAltitude: number): nu
 
 function calculatePhysicsRates(month: number, hour: number, enableInversions: boolean, enableDownslope: boolean) {
     // Reset the rate grid
-    inversionAndDownslopeRate = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.inversionAndDownslopeRate = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
 
     // Inversion effects
-    if (enableInversions && inversionStrength > 0) {
+    if (enableInversions && state.inversionStrength > 0) {
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
-                const elev = elevation[y][x];
-                if (elev < inversionHeight) {
-                    const depthBelowInversion = inversionHeight - elev;
-                    const relativeDepth = depthBelowInversion / (inversionHeight - BASE_ELEVATION + 50);
-                    const coolingEffectRate = -inversionStrength * relativeDepth * 4; // This is now a rate per hour
-                    inversionAndDownslopeRate[y][x] += coolingEffectRate;
+                const elev = state.elevation[y][x];
+                if (elev < state.inversionHeight) {
+                    const depthBelowInversion = state.inversionHeight - elev;
+                    const relativeDepth = depthBelowInversion / (state.inversionHeight - BASE_ELEVATION + 50);
+                    const coolingEffectRate = -state.inversionStrength * relativeDepth * 4; // This is now a rate per hour
+                    state.inversionAndDownslopeRate[y][x] += coolingEffectRate;
 
-                } else if (elev < inversionHeight + 100) {
-                    const heightAboveInversion = elev - inversionHeight;
-                    const warmBeltEffectRate = inversionStrength * Math.exp(-heightAboveInversion / 40) * 3; // Rate per hour
+                } else if (elev < state.inversionHeight + 100) {
+                    const heightAboveInversion = elev - state.inversionHeight;
+                    const warmBeltEffectRate = state.inversionStrength * Math.exp(-heightAboveInversion / 40) * 3; // Rate per hour
 
                     if (isInBounds(x - 1, y - 1) && isInBounds(x + 1, y + 1)) {
                         const avgSurrounding = (
-                            elevation[y - 1][x] + elevation[y + 1][x] +
-                            elevation[y][x - 1] + elevation[y][x + 1]
+                            state.elevation[y - 1][x] + state.elevation[y + 1][x] +
+                            state.elevation[y][x - 1] + state.elevation[y][x + 1]
                         ) / 4;
                         const isSlope = Math.abs(elev - avgSurrounding) < 20;
                         const notValleyFloor = elev > avgSurrounding - 5;
                         if (isSlope && notValleyFloor) {
-                            inversionAndDownslopeRate[y][x] += warmBeltEffectRate;
+                            state.inversionAndDownslopeRate[y][x] += warmBeltEffectRate;
                         }
                     }
                 }
@@ -1373,23 +1305,23 @@ function calculatePhysicsRates(month: number, hour: number, enableInversions: bo
             for (let x = 0; x < GRID_SIZE; x++) {
                 let totalEffectRate = 0;
                 
-                if (downSlopeWinds[y][x] < 0) {
-                    totalEffectRate += downSlopeWinds[y][x];
+                if (state.downSlopeWinds[y][x] < 0) {
+                    totalEffectRate += state.downSlopeWinds[y][x];
                 }
                 
-                if (foehnEffect[y][x] > 0) {
-                    totalEffectRate += foehnEffect[y][x];
+                if (state.foehnEffect[y][x] > 0) {
+                    totalEffectRate += state.foehnEffect[y][x];
                 }
 
-                inversionAndDownslopeRate[y][x] += clamp(totalEffectRate, -5, 12);
+                state.inversionAndDownslopeRate[y][x] += clamp(totalEffectRate, -5, 12);
                 
-                const localWindSpeed = windVectorField[y][x].speed;
+                const localWindSpeed = state.windVectorField[y][x].speed;
                 if (localWindSpeed > 5) {
                     const mixing = Math.min(0.3, localWindSpeed / 50);
                     const baseTemp = calculateBaseTemperature(month, hour);
                     // This is the rate of change towards the base temp
-                    const mixingRate = (baseTemp - temperature[y][x]) * mixing;
-                    inversionAndDownslopeRate[y][x] += mixingRate;
+                    const mixingRate = (baseTemp - state.temperature[y][x]) * mixing;
+                    state.inversionAndDownslopeRate[y][x] += mixingRate;
                 }
             }
         }
@@ -1411,64 +1343,64 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     const enableClouds = (document.getElementById('enableClouds') as HTMLInputElement).checked;
 
     const totalMinutesInDay = 24 * 60;
-    if (simulationTime >= totalMinutesInDay) {
-        simulationTime -= totalMinutesInDay;
+    if (state.simulationTime >= totalMinutesInDay) {
+        state.simulationTime -= totalMinutesInDay;
     }
-    const currentHour = Math.floor(simulationTime / 60);
-    const currentMinute = Math.floor(simulationTime % 60);
+    const currentHour = Math.floor(state.simulationTime / 60);
+    const currentMinute = Math.floor(state.simulationTime % 60);
 
-    const day = Math.floor(simulationTime / totalMinutesInDay) + 1;
+    const day = Math.floor(state.simulationTime / totalMinutesInDay) + 1;
     (document.getElementById('simDay') as HTMLElement).textContent = `Day ${day}`;
     (document.getElementById('simTime') as HTMLElement).textContent = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
 
     const sunAltitude = Math.max(0, Math.sin((currentHour + currentMinute / 60 - 6) * Math.PI / 12));
     const timeFactor = simDeltaTimeMinutes / 60.0;
 
-    latentHeatEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+    state.latentHeatEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     
     if (enableDownslope) {
         calculateDownslopeWinds(currentHour, windSpeed, windDir, windGustiness);
     } else {
-        downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-        windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
-        foehnEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
+        state.foehnEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     }
     
     // --- ADVECTION STEP ---
     if (enableAdvection && timeFactor > 0) {
-        temperature = advectGrid(temperature, windVectorField, timeFactor);
-        humidity = advectGrid(humidity, windVectorField, timeFactor);
-        cloudWater = advectGrid(cloudWater, windVectorField, timeFactor);
+        state.temperature = advectGrid(state.temperature, state.windVectorField, timeFactor);
+        state.humidity = advectGrid(state.humidity, state.windVectorField, timeFactor);
+        state.cloudWater = advectGrid(state.cloudWater, state.windVectorField, timeFactor);
     }
 
     if (enableClouds) {
-        updateCloudDynamics(currentHour, windSpeed, windDir, timeFactor);
+        updateCloudDynamics(month, currentHour, windSpeed, windDir, timeFactor);
     } else {
-        cloudCoverage = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-        precipitation = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-        thermalStrength = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.cloudCoverage = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.precipitation = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.thermalStrength = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     }
 
     if (enableInversions) {
-        const totalCloudCover = cloudCoverage.flat().reduce((a, b) => a + b, 0) / (GRID_SIZE * GRID_SIZE);
+        const totalCloudCover = state.cloudCoverage.flat().reduce((a, b) => a + b, 0) / (GRID_SIZE * GRID_SIZE);
         calculateInversionLayer(currentHour, windSpeed, totalCloudCover);
     } else {
-        inversionHeight = 0;
-        inversionStrength = 0;
+        state.inversionHeight = 0;
+        state.inversionStrength = 0;
     }
     
     updateFogSimulation(currentHour, sunAltitude, timeFactor);
     
     calculatePhysicsRates(month, currentHour, enableInversions, enableDownslope);
 
-    let newTemperature: number[][] = temperature.map(row => [...row]);
-    let newSoilTemperature: number[][] = soilTemperature.map(row => [...row]);
+    let newTemperature: number[][] = state.temperature.map(row => [...row]);
+    let newSoilTemperature: number[][] = state.soilTemperature.map(row => [...row]);
     
     if (timeFactor > 0) {
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
-                const prevAirTemp = temperature[y][x];
-                const prevSoilTemp = soilTemperature[y][x];
+                const prevAirTemp = state.temperature[y][x];
+                const prevSoilTemp = state.soilTemperature[y][x];
                 const thermalProps = getThermalProperties(x, y);
 
                 let airEnergyBalance = 0;
@@ -1486,7 +1418,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
                 
                 // --- Radiative Cooling ---
                 if (sunAltitude <= 0) {
-                    const cloudFactor = 1 - (cloudCoverage[y][x] || 0) * 0.75;
+                    const cloudFactor = 1 - (state.cloudCoverage[y][x] || 0) * 0.75;
                     const coolingRate = 1.2 * cloudFactor;
                     // Snow insulates the ground from radiating heat away
                     const soilCooling = coolingRate * (1 - snowEffects.insulationEffect);
@@ -1508,31 +1440,31 @@ function runSimulation(simDeltaTimeMinutes: number): void {
                 soilEnergyBalance -= exchangeRate / thermalProps.heatCapacity;
                 
                 // --- Evaporative Cooling ---
-                if (soilMoisture[y][x] > 0 && prevAirTemp > 0 && sunAltitude > 0) {
-                    const evapCoolingRate = soilMoisture[y][x] * thermalProps.evaporation * sunAltitude * 1.0; // Reduced from 1.2
+                if (state.soilMoisture[y][x] > 0 && prevAirTemp > 0 && sunAltitude > 0) {
+                    const evapCoolingRate = state.soilMoisture[y][x] * thermalProps.evaporation * sunAltitude * 1.0; // Reduced from 1.2
                     airEnergyBalance -= evapCoolingRate;
                     soilEnergyBalance -= (evapCoolingRate * 0.5) / thermalProps.heatCapacity;
-                    if (isSimulating) {
-                        soilMoisture[y][x] = Math.max(0, soilMoisture[y][x] - thermalProps.evaporation * 0.005 * timeFactor);
+                    if (state.isSimulating) {
+                        state.soilMoisture[y][x] = Math.max(0, state.soilMoisture[y][x] - thermalProps.evaporation * 0.005 * timeFactor);
                     }
                 }
 
                 // --- Forest Effects ---
-                if (landCover[y][x] === LAND_TYPES.FOREST) {
-                    const depthFactor = Math.min(1, forestDepth[y][x] / 12);
+                if (state.landCover[y][x] === LAND_TYPES.FOREST) {
+                    const depthFactor = Math.min(1, state.forestDepth[y][x] / 12);
                     airEnergyBalance += (sunAltitude > 0) ? -1.0 * depthFactor : 0.3 * depthFactor; // Reduced from -1.5 / 0.5
                 }
 
                 // --- Inversion and Downslope Wind Effects (as rates) ---
-                airEnergyBalance += inversionAndDownslopeRate[y][x];
+                airEnergyBalance += state.inversionAndDownslopeRate[y][x];
 
                 // --- Latent Heat from Precipitation ---
-                if (latentHeatEffect[y][x] > 0) {
-                    airEnergyBalance += latentHeatEffect[y][x] / timeFactor;
+                if (state.latentHeatEffect[y][x] > 0) {
+                    airEnergyBalance += state.latentHeatEffect[y][x] / timeFactor;
                 }
                 
                 // --- Atmospheric Mixing ---
-                const stdTempAtElev = 15 - (elevation[y][x] - BASE_ELEVATION) / 100 * LAPSE_RATE;
+                const stdTempAtElev = 15 - (state.elevation[y][x] - BASE_ELEVATION) / 100 * LAPSE_RATE;
                 airEnergyBalance += (stdTempAtElev - prevAirTemp) * 0.05;
 
                 // --- Clamp Rates & Apply Changes ---
@@ -1574,17 +1506,17 @@ function runSimulation(simDeltaTimeMinutes: number): void {
         }
     }
 
-    temperature = newTemperature;
-    soilTemperature = newSoilTemperature;
+    state.temperature = newTemperature;
+    state.soilTemperature = newSoilTemperature;
 
     let minT = Infinity, maxT = -Infinity, sumT = 0, totalPrecip = 0, maxCloudH = 0, totalSnow = 0;
-    const flatTemp = temperature.flat();
+    const flatTemp = state.temperature.flat();
     minT = Math.min(...flatTemp);
     maxT = Math.max(...flatTemp);
     sumT = flatTemp.reduce((a, b) => a + b, 0);
-    totalPrecip = precipitation.flat().reduce((a, b) => a + b, 0);
-    maxCloudH = Math.max(...cloudTop.flat());
-    totalSnow = snowDepth.flat().reduce((a, b) => a + b, 0);
+    totalPrecip = state.precipitation.flat().reduce((a, b) => a + b, 0);
+    maxCloudH = Math.max(...state.cloudTop.flat());
+    totalSnow = state.snowDepth.flat().reduce((a, b) => a + b, 0);
 
     
     (document.getElementById('minTemp') as HTMLElement).textContent = `${minT.toFixed(1)}°C`;
@@ -1596,10 +1528,10 @@ function runSimulation(simDeltaTimeMinutes: number): void {
 
     
     const inversionInfo = document.getElementById('inversionInfo') as HTMLElement;
-    if (enableInversions && inversionStrength > 0) {
+    if (enableInversions && state.inversionStrength > 0) {
         inversionInfo.style.display = 'block';
-        (document.getElementById('inversionHeight') as HTMLElement).textContent = `${inversionHeight.toFixed(0)}m`;
-        (document.getElementById('inversionStrength') as HTMLElement).textContent = `${(inversionStrength * 100).toFixed(0)}%`;
+        (document.getElementById('inversionHeight') as HTMLElement).textContent = `${state.inversionHeight.toFixed(0)}m`;
+        (document.getElementById('inversionStrength') as HTMLElement).textContent = `${(state.inversionStrength * 100).toFixed(0)}%`;
     } else {
         inversionInfo.style.display = 'none';
     }
@@ -1632,7 +1564,7 @@ function drawGrid(): void {
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const color = showSoil ? getThermalProperties(x, y).color : LAND_COLORS[landCover[y][x]];
+            const color = showSoil ? getThermalProperties(x, y).color : LAND_COLORS[state.landCover[y][x]];
             ctx.fillStyle = color;
             ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
         }
@@ -1641,7 +1573,7 @@ function drawGrid(): void {
     if (showHillshade) {
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
-                const shade = hillshade[y][x];
+                const shade = state.hillshade[y][x];
                 ctx.fillStyle = `rgba(0,0,0,${0.5 * (1 - shade)})`;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }
@@ -1651,7 +1583,7 @@ function drawGrid(): void {
     if (showHeatmap) {
          for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
-                const color = getTemperatureColor(temperature[y][x]);
+                const color = getTemperatureColor(state.temperature[y][x]);
                 ctx.globalAlpha = 0.6;
                 ctx.fillStyle = color;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
@@ -1662,21 +1594,21 @@ function drawGrid(): void {
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            if (showSnow && snowDepth[y][x] > 0.1) {
-                const snowOpacity = Math.min(0.9, snowDepth[y][x] / 50);
+            if (showSnow && state.snowDepth[y][x] > 0.1) {
+                const snowOpacity = Math.min(0.9, state.snowDepth[y][x] / 50);
                 ctx.fillStyle = `rgba(255, 255, 255, ${snowOpacity})`;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }
-            if (showClouds && cloudCoverage[y][x] > 0.1) {
-                ctx.fillStyle = `rgba(255, 255, 255, ${clamp(cloudCoverage[y][x], 0, 0.8)})`;
+            if (showClouds && state.cloudCoverage[y][x] > 0.1) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${clamp(state.cloudCoverage[y][x], 0, 0.8)})`;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }
-            if (showFog && fogDensity[y][x] > 0.1) {
-                ctx.fillStyle = `rgba(200, 200, 200, ${clamp(fogDensity[y][x], 0, 0.7)})`;
+            if (showFog && state.fogDensity[y][x] > 0.1) {
+                ctx.fillStyle = `rgba(200, 200, 200, ${clamp(state.fogDensity[y][x], 0, 0.7)})`;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }
-            if (showPrecip && precipitation[y][x] > 0.05) {
-                const pType = precipitationType[y][x];
+            if (showPrecip && state.precipitation[y][x] > 0.05) {
+                const pType = state.precipitationType[y][x];
                 let precipColor = 'rgba(100, 150, 255, 0.7)';
                 if (pType === PRECIP_TYPES.SNOW) precipColor = 'rgba(220, 220, 255, 0.7)';
                 else if (pType === PRECIP_TYPES.SLEET) precipColor = 'rgba(180, 200, 255, 0.7)';
@@ -1690,7 +1622,7 @@ function drawGrid(): void {
         ctx.lineWidth = 1;
         for (let y = 0; y < GRID_SIZE; y += 4) {
             for (let x = 0; x < GRID_SIZE; x += 4) {
-                const wind = windVectorField[y][x];
+                const wind = state.windVectorField[y][x];
                 if (wind.speed > 1) {
                     const centerX = x * CELL_SIZE + CELL_SIZE * 2;
                     const centerY = y * CELL_SIZE + CELL_SIZE * 2;
@@ -1698,8 +1630,8 @@ function drawGrid(): void {
                     const angle = Math.atan2(wind.y, wind.x);
                     const length = Math.min(CELL_SIZE * 2, wind.speed);
                     
-                    if (foehnEffect[y][x] > 0.5) ctx.strokeStyle = 'red';
-                    else if (downSlopeWinds[y][x] < -0.2) ctx.strokeStyle = 'blue';
+                    if (state.foehnEffect[y][x] > 0.5) ctx.strokeStyle = 'red';
+                    else if (state.downSlopeWinds[y][x] < -0.2) ctx.strokeStyle = 'blue';
                     else ctx.strokeStyle = 'white';
                     
                     ctx.beginPath();
@@ -1730,65 +1662,65 @@ function handleMouseMove(e: MouseEvent): void {
         tooltip.style.left = `${e.clientX + 15}px`;
         tooltip.style.top = `${e.clientY}px`;
         
-        const land = Object.keys(LAND_TYPES).find(key => LAND_TYPES[key as keyof typeof LAND_TYPES] === landCover[y][x]);
+        const land = Object.keys(LAND_TYPES).find(key => LAND_TYPES[key as keyof typeof LAND_TYPES] === state.landCover[y][x]);
         const surface = getThermalProperties(x, y).name;
         tooltip.innerHTML = `
             <strong>Coords:</strong> ${x}, ${y}<br>
-            <strong>Air Temp:</strong> ${temperature[y][x].toFixed(1)}°C<br>
-            <strong>Surface Temp:</strong> ${soilTemperature[y][x].toFixed(1)}°C<br>
-            <strong>Elevation:</strong> ${elevation[y][x].toFixed(0)}m<br>
+            <strong>Air Temp:</strong> ${state.temperature[y][x].toFixed(1)}°C<br>
+            <strong>Surface Temp:</strong> ${state.soilTemperature[y][x].toFixed(1)}°C<br>
+            <strong>Elevation:</strong> ${state.elevation[y][x].toFixed(0)}m<br>
             <strong>Land:</strong> ${land}<br>
             <strong>Surface:</strong> ${surface}<br>
-            <strong>Humidity:</strong> ${(humidity[y][x] * 100).toFixed(0)}%<br>
-            <strong>Cloud:</strong> ${(cloudCoverage[y][x] * 100).toFixed(0)}%<br>
-            <strong>Wind:</strong> ${windVectorField[y][x].speed.toFixed(1)} km/h<br>
-            <strong>Snow:</strong> ${snowDepth[y][x].toFixed(1)}cm
+            <strong>Humidity:</strong> ${(state.humidity[y][x] * 100).toFixed(0)}%<br>
+            <strong>Cloud:</strong> ${(state.cloudCoverage[y][x] * 100).toFixed(0)}%<br>
+            <strong>Wind:</strong> ${state.windVectorField[y][x].speed.toFixed(1)} km/h<br>
+            <strong>Snow:</strong> ${state.snowDepth[y][x].toFixed(1)}cm
         `;
     } else {
         tooltip.style.display = 'none';
     }
 
-    if (isDrawing) {
+    if (state.isDrawing) {
         drawOnCanvas(x, y);
     }
 }
 
 function drawOnCanvas(gridX: number, gridY: number): void {
     let needsRecalculation = false;
-    for (let y = gridY - brushSize; y <= gridY + brushSize; y++) {
-        for (let x = gridX - brushSize; x <= gridX + brushSize; x++) {
-            if (isInBounds(x, y) && distance(x, y, gridX, gridY) <= brushSize) {
-                const power = 1 - (distance(x, y, gridX, gridY) / brushSize);
+    for (let y = gridY - state.brushSize; y <= gridY + state.brushSize; y++) {
+        for (let x = gridX - state.brushSize; x <= gridX + state.brushSize; x++) {
+            if (isInBounds(x, y) && distance(x, y, gridX, gridY) <= state.brushSize) {
+                const power = 1 - (distance(x, y, gridX, gridY) / state.brushSize);
                 
-                if (currentBrushCategory === 'terrain') {
-                    const change = (isRightClick ? -terrainStrength : terrainStrength) * power;
-                    elevation[y][x] = clamp(elevation[y][x] + change, 0, 1000);
+                if (state.currentBrushCategory === 'terrain') {
+                    const change = (state.isRightClick ? -state.terrainStrength : state.terrainStrength) * power;
+                    state.elevation[y][x] = clamp(state.elevation[y][x] + change, 0, 1000);
                      needsRecalculation = true;
-                } else if (currentBrushCategory === 'land') {
-                    if (LAND_TYPE_MAP[currentBrush] !== undefined) {
-                       landCover[y][x] = LAND_TYPE_MAP[currentBrush];
+                } else if (state.currentBrushCategory === 'land') {
+                    if (LAND_TYPE_MAP[state.currentBrush] !== undefined) {
+                       state.landCover[y][x] = LAND_TYPE_MAP[state.currentBrush];
                        needsRecalculation = true;
                     }
-                } else if (currentBrushCategory === 'soil') {
-                    if (SOIL_TYPE_MAP[currentBrush] !== undefined) {
-                        soilType[y][x] = SOIL_TYPE_MAP[currentBrush];
+                } else if (state.currentBrushCategory === 'soil') {
+                    if (SOIL_TYPE_MAP[state.currentBrush] !== undefined) {
+                        state.soilType[y][x] = SOIL_TYPE_MAP[state.currentBrush];
                         needsRecalculation = true;
                     }
-                } else if (currentBrushCategory === 'action') {
-                    if (currentBrush === 'manualPrecipitation') {
-                        const currentTemp = temperature[y][x];
+                } else if (state.currentBrushCategory === 'action') {
+                    if (state.currentBrush === 'manualPrecipitation') {
+                        const currentTemp = state.temperature[y][x];
                         const effectAmount = 0.8 * power;
 
                         if (currentTemp > -5) {
                             const liquidPrecipAmount = effectAmount * 0.5;
                             const coolingAmount = 1.5 * power;
-                            soilMoisture[y][x] = Math.min(1, soilMoisture[y][x] + liquidPrecipAmount);
-                            temperature[y][x] -= coolingAmount;
+                            state.soilMoisture[y][x] = Math.min(1, state.soilMoisture[y][x] + liquidPrecipAmount);
+                            state.temperature[y][x] -= coolingAmount;
                         } else {
                             const snowAmount = effectAmount * 5;
                             const warmingAmount = 0.5 * power;
-                            snowDepth[y][x] += snowAmount;
-                            temperature[y][x] += warmingAmount;
+                            state.snowDepth[y][x] += snowAmount;
+                            state.temperature[y][x] += warmingAmount;
                         }
                     }
                 }
@@ -1797,7 +1729,7 @@ function drawOnCanvas(gridX: number, gridY: number): void {
     }
     
     if (needsRecalculation) {
-        if (currentBrushCategory === 'terrain') {
+        if (state.currentBrushCategory === 'terrain') {
             calculateHillshade();
         } else {
             calculateContiguousAreas();
@@ -1835,11 +1767,11 @@ function setupEventListeners(): void {
         btn.addEventListener('click', () => {
             document.querySelector('.brush-btn.active')?.classList.remove('active');
             btn.classList.add('active');
-            currentBrush = btn.getAttribute('data-brush')!;
-            currentBrushCategory = btn.getAttribute('data-category')!;
+            state.currentBrush = btn.getAttribute('data-brush')!;
+            state.currentBrushCategory = btn.getAttribute('data-category')!;
             
             const terrainStrengthGroup = document.getElementById('terrainStrengthGroup') as HTMLElement;
-            terrainStrengthGroup.style.display = currentBrushCategory === 'terrain' ? 'block' : 'none';
+            terrainStrengthGroup.style.display = state.currentBrushCategory === 'terrain' ? 'block' : 'none';
         });
     });
     
@@ -1868,55 +1800,55 @@ function setupEventListeners(): void {
     });
 
     document.getElementById('brushSize')?.addEventListener('input', e => {
-        brushSize = parseInt((e.target as HTMLInputElement).value);
-        (document.getElementById('brushSizeValue') as HTMLElement).textContent = brushSize.toString();
+        state.brushSize = parseInt((e.target as HTMLInputElement).value);
+        (document.getElementById('brushSizeValue') as HTMLElement).textContent = state.brushSize.toString();
     });
     document.getElementById('terrainStrength')?.addEventListener('input', e => {
-        terrainStrength = parseInt((e.target as HTMLInputElement).value);
-        (document.getElementById('terrainStrengthValue') as HTMLElement).textContent = terrainStrength.toString();
+        state.terrainStrength = parseInt((e.target as HTMLInputElement).value);
+        (document.getElementById('terrainStrengthValue') as HTMLElement).textContent = state.terrainStrength.toString();
     });
 
     const playPauseBtn = document.getElementById('playPauseBtn') as HTMLButtonElement;
     playPauseBtn.addEventListener('click', () => {
-        isSimulating = !isSimulating;
-        playPauseBtn.innerHTML = isSimulating ? '⏸️ Pause' : '▶️ Play';
-        if (isSimulating) {
-            lastFrameTime = performance.now();
+        state.isSimulating = !state.isSimulating;
+        playPauseBtn.innerHTML = state.isSimulating ? '⏸️ Pause' : '▶️ Play';
+        if (state.isSimulating) {
+            state.lastFrameTime = performance.now();
         }
     });
 
     document.getElementById('createScenarioBtn')?.addEventListener('click', () => {
-        isSimulating = false;
+        state.isSimulating = false;
         playPauseBtn.innerHTML = '▶️ Play';
-        simulationTime = 6 * 60; // Reset time to the start of the day
+        state.simulationTime = 6 * 60; // Reset time to the start of the day
         runSimulation(0); // Run a single frame to apply all current settings at the start time
     });
 
     document.getElementById('resetBtn')?.addEventListener('click', () => {
-        isSimulating = false;
+        state.isSimulating = false;
         (document.getElementById('playPauseBtn') as HTMLButtonElement).innerHTML = '▶️ Play';
-        simulationTime = 6 * 60;
+        state.simulationTime = 6 * 60;
         initializeGrids();
     });
     document.getElementById('simSpeed')?.addEventListener('input', e => {
-        simulationSpeed = parseInt((e.target as HTMLInputElement).value);
-        (document.getElementById('speedValue') as HTMLElement).textContent = `${simulationSpeed}x`;
+        state.simulationSpeed = parseInt((e.target as HTMLInputElement).value);
+        (document.getElementById('speedValue') as HTMLElement).textContent = `${state.simulationSpeed}x`;
     });
 
 
     canvas.addEventListener('mousedown', e => {
-        isDrawing = true;
-        isRightClick = e.button === 2;
+        state.isDrawing = true;
+        state.isRightClick = e.button === 2;
         handleMouseMove(e as MouseEvent);
         e.preventDefault();
     });
     canvas.addEventListener('mouseup', () => {
-        if(isDrawing){
-            isDrawing = false;
+        if(state.isDrawing){
+            state.isDrawing = false;
         }
     });
     canvas.addEventListener('mouseleave', () => {
-        isDrawing = false;
+        state.isDrawing = false;
         tooltip.style.display = 'none';
     });
     canvas.addEventListener('mousemove', handleMouseMove);
@@ -1925,12 +1857,12 @@ function setupEventListeners(): void {
 
 // ===== SIMULATION LOOP =====
 function simulationLoop(currentTime: number) {
-    const deltaTime = (currentTime - lastFrameTime) / 1000;
-    lastFrameTime = currentTime;
+    const deltaTime = (currentTime - state.lastFrameTime) / 1000;
+    state.lastFrameTime = currentTime;
 
-    if (isSimulating) {
-        const simDeltaTimeMinutes = deltaTime * SIM_MINUTES_PER_REAL_SECOND * simulationSpeed;
-        simulationTime += simDeltaTimeMinutes;
+    if (state.isSimulating) {
+        const simDeltaTimeMinutes = deltaTime * SIM_MINUTES_PER_REAL_SECOND * state.simulationSpeed;
+        state.simulationTime += simDeltaTimeMinutes;
         runSimulation(simDeltaTimeMinutes);
     }
 
