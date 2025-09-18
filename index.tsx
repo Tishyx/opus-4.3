@@ -75,7 +75,7 @@ function bilinearInterpolate(grid: number[][], x: number, y: number): number {
 
 function advectGrid(
     grid: number[][],
-    windField: {x: number, y: number, speed: number}[][],
+    windField: { x: number; y: number; speed: number }[][],
     timeFactor: number
 ): number[][] {
     const newGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
@@ -87,17 +87,15 @@ function advectGrid(
             // Trace backward in time to find the source of the air
             const sourceX = x - wind.x * dt;
             const sourceY = y - wind.y * dt;
-            
+
             // Sample the value from the original grid at the source location
             const advectedValue = bilinearInterpolate(grid, sourceX, sourceY);
-            
+
             newGrid[y][x] = advectedValue;
         }
     }
     return newGrid;
 }
-
-
 // ===== SNOW DYNAMICS =====
 function updateSnowCover(temperatureGrid: number[][], sunAltitude: number, timeFactor: number) {
     for (let y = 0; y < GRID_SIZE; y++) {
@@ -1024,7 +1022,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
             for (let x = 0; x < GRID_SIZE; x++) {
                 const prevAirTemp = state.temperature[y][x];
                 const prevSoilTemp = state.soilTemperature[y][x];
-                const thermalProps = getThermalProperties(state, x, y);
+                const thermalProps = getThermalProperties(x, y);
 
                 let airEnergyBalance = 0;
                 let soilEnergyBalance = 0;
