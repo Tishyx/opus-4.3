@@ -21,6 +21,8 @@ export const FOG_DIFFUSION_RATE = 0.4;
 export const EPSILON = 1e-6;
 
 export const MONTHLY_TEMPS = [-10, -8, -3, 2, 8, 13, 15, 15, 8, 2, -4, -9];
+export const MONTHLY_DAYLIGHT_HOURS = [8.1, 9.4, 11.6, 13.7, 15.3, 16.1, 15.8, 14.0, 12.2, 10.1, 8.6, 7.9];
+export const MONTHLY_DIURNAL_VARIATION = [4.5, 5.0, 6.5, 8.0, 9.5, 10.5, 10.0, 8.5, 6.5, 5.5, 4.5, 4.0];
 
 export const LAND_TYPE_MAP: Record<string, number> = {
   grassland: LAND_TYPES.GRASSLAND,
