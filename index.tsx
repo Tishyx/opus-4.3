@@ -9,11 +9,9 @@ import {
     SETTLEMENT_PROPERTIES,
     SHADOW_COOLING,
     SOIL_PROPERTIES,
-    SOLAR_INTENSITY_FACTOR,
     URBAN_HEAT_RADIUS,
     URBAN_PROPERTIES,
     WATER_PROPERTIES,
-    WIND_CHILL_FACTOR,
 } from './src/shared/constants';
 import { LAND_TYPES, SOIL_TYPES } from './src/shared/types';
 import {
@@ -28,22 +26,24 @@ import {
     initializeEnvironment,
 } from './src/simulation/environment';
 import { CLOUD_TYPES, PRECIP_TYPES } from './src/simulation/weatherTypes';
-import { calculateBaseTemperature } from './src/simulation/temperature';
-import { calculateCloudRadiation, updateCloudDynamics } from './src/simulation/clouds';
+import { updateCloudDynamics } from './src/simulation/clouds';
 import { advectGrid, calculateDownslopeWinds } from './src/simulation/wind';
 import { updateFogSimulation } from './src/simulation/fog';
 import { initializeSoilMoisture } from './src/simulation/soil';
-import { calculateSnowEffects, updateSnowCover } from './src/simulation/snow';
 import {
     clamp,
     describeSurface,
     distance,
     getLandColor,
-    getThermalProperties,
     isInBounds,
     resolveLandType,
     resolveSoilType,
 } from './src/simulation/utils';
+import {
+    calculateInversionLayer,
+    calculateSimulationMetrics,
+    updateThermodynamics,
+} from './src/simulation/physics';
 
 // ===== GLOBAL STATE =====
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -54,147 +54,12 @@ const state: SimulationState = createSimulationState();
 resizeCanvas(canvas);
 const SIM_MINUTES_PER_REAL_SECOND = 15; // At 1x speed, 1 real second = 15 sim minutes
 
-// ===== TEMPERATURE INVERSION CALCULATIONS =====
-function calculateInversionLayer(hour: number, windSpeed: number, cloudCover = 0): void {
-    const isNightTime = hour <= 6 || hour >= 19;
-    
-    if (!isNightTime || windSpeed > 15 || cloudCover > 0.5) {
-        state.inversionHeight = 0;
-        state.inversionStrength = 0;
-        return;
-    }
-    
-    let minElev = Infinity;
-    let maxElev = -Infinity;
-    let valleyElevSum = 0;
-    let valleyCount = 0;
-    
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            const elev = state.elevation[y][x];
-            minElev = Math.min(minElev, elev);
-            maxElev = Math.max(maxElev, elev);
-            
-            if (elev < BASE_ELEVATION + 20) {
-                valleyElevSum += elev;
-                valleyCount++;
-            }
-        }
-    }
-    
-    const valleyAvgElev = valleyCount > 0 ? valleyElevSum / valleyCount : BASE_ELEVATION;
-    const terrainRelief = maxElev - minElev;
-    
-    const windFactor = Math.max(0, 1 - windSpeed / 15);
-    const hourFactor = hour <= 6 ? (6 - hour) / 6 : (hour - 19) / 5;
-    
-    state.inversionHeight = valleyAvgElev + 50 + (200 * windFactor * hourFactor);
-    state.inversionStrength = windFactor * hourFactor * Math.min(1, terrainRelief / 100);
-    
-    state.inversionHeight = Math.min(state.inversionHeight, valleyAvgElev + 300);
-    
-    if (windSpeed > 10 || terrainRelief < 30) {
-        state.inversionStrength *= 0.5;
-    }
-}
-
-// ===== AREA AND DISTANCE CALCULATIONS =====
+// ===== INITIALIZATION =====
 function initializeGrids(): void {
     initializeEnvironment(state);
     initializeSoilMoisture(state);
     runSimulation(0);
 }
-
-// ===== TEMPERATURE SIMULATION =====
-function calculateSolarInsolation(x: number, y: number, sunAltitude: number): number {
-    if (sunAltitude <= 0 || !isInBounds(x-1, y-1) || !isInBounds(x+1, y+1)) {
-        return 0;
-    }
-    
-    const dzdx = (state.elevation[y][x + 1] - state.elevation[y][x - 1]) / (2 * CELL_SIZE);
-    const dzdy = (state.elevation[y + 1][x] - state.elevation[y - 1][x]) / (2 * CELL_SIZE);
-    
-    const slope = Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy));
-    const aspect = Math.atan2(-dzdy, dzdx);
-    
-    const solarIntensity = Math.max(0, 
-        Math.cos(slope) * sunAltitude + 
-        Math.sin(slope) * sunAltitude * Math.cos(aspect - Math.PI)
-    );
-    
-    let cloudReduction = 1;
-    if (state.cloudCoverage && state.cloudCoverage[y] && state.cloudCoverage[y][x] > 0) {
-        const cloudRadiation = calculateCloudRadiation(state, x, y, sunAltitude);
-        cloudReduction = cloudRadiation.solarTransmission;
-    }
-    
-    return Math.min(3, solarIntensity * SOLAR_INTENSITY_FACTOR * cloudReduction);
-}
-
-function calculatePhysicsRates(month: number, hour: number, enableInversions: boolean, enableDownslope: boolean) {
-    // Reset the rate grid
-    state.inversionAndDownslopeRate = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-
-    // Inversion effects
-    if (enableInversions && state.inversionStrength > 0) {
-        for (let y = 0; y < GRID_SIZE; y++) {
-            for (let x = 0; x < GRID_SIZE; x++) {
-                const elev = state.elevation[y][x];
-                if (elev < state.inversionHeight) {
-                    const depthBelowInversion = state.inversionHeight - elev;
-                    const relativeDepth = depthBelowInversion / (state.inversionHeight - BASE_ELEVATION + 50);
-                    const coolingEffectRate = -state.inversionStrength * relativeDepth * 4; // This is now a rate per hour
-                    state.inversionAndDownslopeRate[y][x] += coolingEffectRate;
-
-                } else if (elev < state.inversionHeight + 100) {
-                    const heightAboveInversion = elev - state.inversionHeight;
-                    const warmBeltEffectRate = state.inversionStrength * Math.exp(-heightAboveInversion / 40) * 3; // Rate per hour
-
-                    if (isInBounds(x - 1, y - 1) && isInBounds(x + 1, y + 1)) {
-                        const avgSurrounding = (
-                            state.elevation[y - 1][x] + state.elevation[y + 1][x] +
-                            state.elevation[y][x - 1] + state.elevation[y][x + 1]
-                        ) / 4;
-                        const isSlope = Math.abs(elev - avgSurrounding) < 20;
-                        const notValleyFloor = elev > avgSurrounding - 5;
-                        if (isSlope && notValleyFloor) {
-                            state.inversionAndDownslopeRate[y][x] += warmBeltEffectRate;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Downslope wind effects
-    if (enableDownslope) {
-        for (let y = 0; y < GRID_SIZE; y++) {
-            for (let x = 0; x < GRID_SIZE; x++) {
-                let totalEffectRate = 0;
-                
-                if (state.downSlopeWinds[y][x] < 0) {
-                    totalEffectRate += state.downSlopeWinds[y][x];
-                }
-                
-                if (state.foehnEffect[y][x] > 0) {
-                    totalEffectRate += state.foehnEffect[y][x];
-                }
-
-                state.inversionAndDownslopeRate[y][x] += clamp(totalEffectRate, -5, 12);
-                
-                const localWindSpeed = state.windVectorField[y][x].speed;
-                if (localWindSpeed > 5) {
-                    const mixing = Math.min(0.3, localWindSpeed / 50);
-                    const baseTemp = calculateBaseTemperature(month, hour);
-                    // This is the rate of change towards the base temp
-                    const mixingRate = (baseTemp - state.temperature[y][x]) * mixing;
-                    state.inversionAndDownslopeRate[y][x] += mixingRate;
-                }
-            }
-        }
-    }
-}
-
 
 function runSimulation(simDeltaTimeMinutes: number): void {
     if (!ctx) return;
@@ -220,20 +85,19 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     (document.getElementById('simDay') as HTMLElement).textContent = `Day ${day}`;
     (document.getElementById('simTime') as HTMLElement).textContent = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
 
-    const sunAltitude = Math.max(0, Math.sin((currentHour + currentMinute / 60 - 6) * Math.PI / 12));
+    const sunAltitude = Math.max(0, Math.sin(((currentHour + currentMinute / 60) - 6) * Math.PI / 12));
     const timeFactor = simDeltaTimeMinutes / 60.0;
 
     state.latentHeatEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    
+
     if (enableDownslope) {
         calculateDownslopeWinds(state, currentHour, windSpeed, windDir, windGustiness);
     } else {
         state.downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-        state.windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
+        state.windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({ x: 0, y: 0, speed: 0 })));
         state.foehnEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     }
-    
-    // --- ADVECTION STEP ---
+
     if (enableAdvection && timeFactor > 0) {
         state.temperature = advectGrid(state.temperature, state.windVectorField, timeFactor);
         state.humidity = advectGrid(state.humidity, state.windVectorField, timeFactor);
@@ -256,151 +120,33 @@ function runSimulation(simDeltaTimeMinutes: number): void {
 
     if (enableInversions) {
         const totalCloudCover = state.cloudCoverage.flat().reduce((a, b) => a + b, 0) / (GRID_SIZE * GRID_SIZE);
-        calculateInversionLayer(currentHour, windSpeed, totalCloudCover);
+        calculateInversionLayer(state, currentHour, windSpeed, totalCloudCover);
     } else {
         state.inversionHeight = 0;
         state.inversionStrength = 0;
     }
-    
+
     updateFogSimulation(state, currentHour, sunAltitude, timeFactor);
-    
-    calculatePhysicsRates(month, currentHour, enableInversions, enableDownslope);
 
-    let newTemperature: number[][] = state.temperature.map(row => [...row]);
-    let newSoilTemperature: number[][] = state.soilTemperature.map(row => [...row]);
-    
-    if (timeFactor > 0) {
-        for (let y = 0; y < GRID_SIZE; y++) {
-            for (let x = 0; x < GRID_SIZE; x++) {
-                const prevAirTemp = state.temperature[y][x];
-                const prevSoilTemp = state.soilTemperature[y][x];
-                const thermalProps = getThermalProperties(x, y);
+    updateThermodynamics(state, {
+        month,
+        hour: currentHour,
+        sunAltitude,
+        timeFactor,
+        enableDiffusion,
+        enableInversions,
+        enableDownslope,
+    });
 
+    const metrics = calculateSimulationMetrics(state);
 
-                let airEnergyBalance = 0;
-                let soilEnergyBalance = 0;
+    (document.getElementById('minTemp') as HTMLElement).textContent = `${metrics.minTemperature.toFixed(1)}°C`;
+    (document.getElementById('maxTemp') as HTMLElement).textContent = `${metrics.maxTemperature.toFixed(1)}°C`;
+    (document.getElementById('avgTemp') as HTMLElement).textContent = `${metrics.avgTemperature.toFixed(1)}°C`;
+    (document.getElementById('totalPrecip') as HTMLElement).textContent = `${metrics.totalPrecipitation.toFixed(2)}mm/hr`;
+    (document.getElementById('maxCloudHeight') as HTMLElement).textContent = `${metrics.maxCloudHeight.toFixed(0)}m`;
+    (document.getElementById('avgSnowDepth') as HTMLElement).textContent = `${metrics.avgSnowDepth.toFixed(1)}cm`;
 
-                const snowEffects = calculateSnowEffects(state, x, y, sunAltitude);
-                
-                // --- Solar Heating ---
-                if (sunAltitude > 0) {
-                    const insolation = calculateSolarInsolation(x, y, sunAltitude);
-                    const surfaceAlbedo = snowEffects.albedoEffect !== 0 ? 0.8 : thermalProps.albedo;
-                    const absorbedEnergy = insolation * (1 - surfaceAlbedo);
-                    soilEnergyBalance += absorbedEnergy / thermalProps.heatCapacity;
-                }
-                
-                // --- Radiative Cooling ---
-                if (sunAltitude <= 0) {
-                    const cloudFactor = 1 - (state.cloudCoverage[y][x] || 0) * 0.75;
-                    const coolingRate = 1.2 * cloudFactor;
-                    // Snow insulates the ground from radiating heat away
-                    const soilCooling = coolingRate * (1 - snowEffects.insulationEffect);
-                    soilEnergyBalance -= soilCooling / thermalProps.heatCapacity;
-                    airEnergyBalance -= coolingRate * 0.2;
-                }
-                
-                // --- Air-Ground Heat Exchange ---
-                const tempDiff = prevSoilTemp - prevAirTemp;
-                let exchangeRate = tempDiff * thermalProps.conductivity * 0.8 * (1 - snowEffects.insulationEffect); 
-
-                if (thermalProps.name === 'Water') {
-                    // For water, the exchange is much more efficient due to turbulence and moisture.
-                    // We increase the rate to ensure air temp closely tracks water temp.
-                    exchangeRate *= 2.0;
-                }
-
-                airEnergyBalance += exchangeRate;
-                soilEnergyBalance -= exchangeRate / thermalProps.heatCapacity;
-                
-                // --- Evaporative Cooling ---
-                if (state.soilMoisture[y][x] > 0 && prevAirTemp > 0 && sunAltitude > 0) {
-                    const evapCoolingRate = state.soilMoisture[y][x] * thermalProps.evaporation * sunAltitude * 1.0; // Reduced from 1.2
-                    airEnergyBalance -= evapCoolingRate;
-                    soilEnergyBalance -= (evapCoolingRate * 0.5) / thermalProps.heatCapacity;
-                    if (state.isSimulating) {
-                        state.soilMoisture[y][x] = Math.max(0, state.soilMoisture[y][x] - thermalProps.evaporation * 0.005 * timeFactor);
-                    }
-                }
-
-                // --- Forest Effects ---
-                if (state.landCover[y][x] === LAND_TYPES.FOREST) {
-                    const depthFactor = Math.min(1, state.forestDepth[y][x] / 12);
-                    airEnergyBalance += (sunAltitude > 0) ? -1.0 * depthFactor : 0.3 * depthFactor; // Reduced from -1.5 / 0.5
-                }
-
-                // --- Inversion and Downslope Wind Effects (as rates) ---
-                airEnergyBalance += state.inversionAndDownslopeRate[y][x];
-
-                // --- Latent Heat from Precipitation ---
-                if (state.latentHeatEffect[y][x] > 0) {
-                    airEnergyBalance += state.latentHeatEffect[y][x] / timeFactor;
-                }
-                
-                // --- Atmospheric Mixing ---
-                const stdTempAtElev = 15 - (state.elevation[y][x] - BASE_ELEVATION) / 100 * LAPSE_RATE;
-                airEnergyBalance += (stdTempAtElev - prevAirTemp) * 0.05;
-
-                // --- Clamp Rates & Apply Changes ---
-                const MAX_HOURLY_CHANGE = 10;
-                airEnergyBalance = clamp(airEnergyBalance, -MAX_HOURLY_CHANGE, MAX_HOURLY_CHANGE);
-                soilEnergyBalance = clamp(soilEnergyBalance, -MAX_HOURLY_CHANGE, MAX_HOURLY_CHANGE);
-
-                newTemperature[y][x] += airEnergyBalance * timeFactor;
-                newSoilTemperature[y][x] += soilEnergyBalance * timeFactor;
-            }
-        }
-    }
-    
-    updateSnowCover(state, newTemperature, sunAltitude, timeFactor);
-
-    if (enableDiffusion) {
-        for (let i = 0; i < DIFFUSION_ITERATIONS; i++) {
-            const diffusedTemp = newTemperature.map(row => [...row]);
-            for (let y = 1; y < GRID_SIZE - 1; y++) {
-                for (let x = 1; x < GRID_SIZE - 1; x++) {
-                    const avgNeighborTemp = (
-                        newTemperature[y - 1][x] + newTemperature[y + 1][x] +
-                        newTemperature[y][x - 1] + newTemperature[y][x + 1]
-                    ) / 4;
-                    diffusedTemp[y][x] += (avgNeighborTemp - newTemperature[y][x]) * DIFFUSION_RATE;
-                }
-            }
-            newTemperature = diffusedTemp;
-        }
-    }
-
-    const ABSOLUTE_MIN_TEMP = -80;
-    const ABSOLUTE_MAX_TEMP = 80;
-
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            newTemperature[y][x] = clamp(newTemperature[y][x], ABSOLUTE_MIN_TEMP, ABSOLUTE_MAX_TEMP);
-            newSoilTemperature[y][x] = clamp(newSoilTemperature[y][x], ABSOLUTE_MIN_TEMP, ABSOLUTE_MAX_TEMP);
-        }
-    }
-
-    state.temperature = newTemperature;
-    state.soilTemperature = newSoilTemperature;
-
-    let minT = Infinity, maxT = -Infinity, sumT = 0, totalPrecip = 0, maxCloudH = 0, totalSnow = 0;
-    const flatTemp = state.temperature.flat();
-    minT = Math.min(...flatTemp);
-    maxT = Math.max(...flatTemp);
-    sumT = flatTemp.reduce((a, b) => a + b, 0);
-    totalPrecip = state.precipitation.flat().reduce((a, b) => a + b, 0);
-    maxCloudH = Math.max(...state.cloudTop.flat());
-    totalSnow = state.snowDepth.flat().reduce((a, b) => a + b, 0);
-
-    
-    (document.getElementById('minTemp') as HTMLElement).textContent = `${minT.toFixed(1)}°C`;
-    (document.getElementById('maxTemp') as HTMLElement).textContent = `${maxT.toFixed(1)}°C`;
-    (document.getElementById('avgTemp') as HTMLElement).textContent = `${(sumT / (GRID_SIZE * GRID_SIZE)).toFixed(1)}°C`;
-    (document.getElementById('totalPrecip') as HTMLElement).textContent = `${totalPrecip.toFixed(2)}mm/hr`;
-    (document.getElementById('maxCloudHeight') as HTMLElement).textContent = `${maxCloudH.toFixed(0)}m`;
-     (document.getElementById('avgSnowDepth') as HTMLElement).textContent = `${(totalSnow / (GRID_SIZE * GRID_SIZE)).toFixed(1)}cm`;
-
-    
     const inversionInfo = document.getElementById('inversionInfo') as HTMLElement;
     if (enableInversions && state.inversionStrength > 0) {
         inversionInfo.style.display = 'block';
@@ -417,7 +163,6 @@ function runSimulation(simDeltaTimeMinutes: number): void {
 function getTemperatureColor(temp: number): string {
     const minTemp = -10, maxTemp = 40;
     const normalized = clamp((temp - minTemp) / (maxTemp - minTemp), 0, 1);
-    
     const hue = (1 - normalized) * 240;
     return `hsl(${hue}, 80%, 50%)`;
 }
@@ -435,14 +180,13 @@ function drawGrid(): void {
     const showWind = (document.getElementById('showWindFlow') as HTMLInputElement).checked;
     const showSnow = (document.getElementById('showSnowCover') as HTMLInputElement).checked;
 
-
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
             ctx.fillStyle = getLandColor(state, x, y, showSoil);
             ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
         }
     }
-    
+
     if (showHillshade) {
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
@@ -452,9 +196,9 @@ function drawGrid(): void {
             }
         }
     }
-    
+
     if (showHeatmap) {
-         for (let y = 0; y < GRID_SIZE; y++) {
+        for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
                 const color = getTemperatureColor(state.temperature[y][x]);
                 ctx.globalAlpha = 0.6;
@@ -499,24 +243,24 @@ function drawGrid(): void {
                 if (wind.speed > 1) {
                     const centerX = x * CELL_SIZE + CELL_SIZE * 2;
                     const centerY = y * CELL_SIZE + CELL_SIZE * 2;
-                    
+
                     const angle = Math.atan2(wind.y, wind.x);
                     const length = Math.min(CELL_SIZE * 2, wind.speed);
-                    
+
                     if (state.foehnEffect[y][x] > 0.5) ctx.strokeStyle = 'red';
                     else if (state.downSlopeWinds[y][x] < -0.2) ctx.strokeStyle = 'blue';
                     else ctx.strokeStyle = 'white';
-                    
+
                     ctx.beginPath();
                     ctx.moveTo(centerX, centerY);
                     ctx.lineTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
                     ctx.stroke();
-                    
+
                     ctx.beginPath();
                     ctx.moveTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
-                    ctx.lineTo(centerX + Math.cos(angle - 0.5) * (length-4), centerY + Math.sin(angle - 0.5) * (length-4));
+                    ctx.lineTo(centerX + Math.cos(angle - 0.5) * (length - 4), centerY + Math.sin(angle - 0.5) * (length - 4));
                     ctx.moveTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
-                    ctx.lineTo(centerX + Math.cos(angle + 0.5) * (length-4), centerY + Math.sin(angle + 0.5) * (length-4));
+                    ctx.lineTo(centerX + Math.cos(angle + 0.5) * (length - 4), centerY + Math.sin(angle + 0.5) * (length - 4));
                     ctx.stroke();
                 }
             }
@@ -534,7 +278,7 @@ function handleMouseMove(e: MouseEvent): void {
         tooltip.style.display = 'block';
         tooltip.style.left = `${e.clientX + 15}px`;
         tooltip.style.top = `${e.clientY}px`;
-        
+
         const land = Object.keys(LAND_TYPES).find(key => LAND_TYPES[key as keyof typeof LAND_TYPES] === state.landCover[y][x]);
         const surface = describeSurface(state, x, y);
         tooltip.innerHTML = `
@@ -564,11 +308,11 @@ function drawOnCanvas(gridX: number, gridY: number): void {
         for (let x = gridX - state.brushSize; x <= gridX + state.brushSize; x++) {
             if (isInBounds(x, y) && distance(x, y, gridX, gridY) <= state.brushSize) {
                 const power = 1 - (distance(x, y, gridX, gridY) / state.brushSize);
-                
+
                 if (state.currentBrushCategory === 'terrain') {
                     const change = (state.isRightClick ? -state.terrainStrength : state.terrainStrength) * power;
                     state.elevation[y][x] = clamp(state.elevation[y][x] + change, 0, 1000);
-                     needsRecalculation = true;
+                    needsRecalculation = true;
                 } else if (state.currentBrushCategory === 'land') {
                     const landType = resolveLandType(state.currentBrush);
                     if (landType !== undefined) {
@@ -602,7 +346,7 @@ function drawOnCanvas(gridX: number, gridY: number): void {
             }
         }
     }
-    
+
     if (needsRecalculation) {
         if (state.currentBrushCategory === 'terrain') {
             calculateHillshade(state);
@@ -612,7 +356,7 @@ function drawOnCanvas(gridX: number, gridY: number): void {
             initializeSoilMoisture(state);
         }
     }
-    
+
     // When drawing, only update the static view, don't advance time.
     runSimulation(0);
 }
@@ -644,12 +388,12 @@ function setupEventListeners(): void {
             btn.classList.add('active');
             state.currentBrush = btn.getAttribute('data-brush')!;
             state.currentBrushCategory = btn.getAttribute('data-category')!;
-            
+
             const terrainStrengthGroup = document.getElementById('terrainStrengthGroup') as HTMLElement;
             terrainStrengthGroup.style.display = state.currentBrushCategory === 'terrain' ? 'block' : 'none';
         });
     });
-    
+
     // Re-couple climate settings to provide immediate feedback
     document.getElementById('month')?.addEventListener('change', () => runSimulation(0));
     document.getElementById('windDirection')?.addEventListener('change', () => runSimulation(0));
@@ -661,7 +405,7 @@ function setupEventListeners(): void {
         (document.getElementById('windGustinessValue') as HTMLElement).textContent = (e.target as HTMLInputElement).value;
         runSimulation(0);
     });
-    
+
     document.querySelectorAll('#controls input[type="checkbox"]').forEach(checkbox => {
         checkbox.addEventListener('change', () => {
             // Visualization checkboxes should redraw immediately.
@@ -710,15 +454,14 @@ function setupEventListeners(): void {
         (document.getElementById('speedValue') as HTMLElement).textContent = `${state.simulationSpeed}x`;
     });
 
-
     canvas.addEventListener('mousedown', e => {
         state.isDrawing = true;
-        state.isRightClick = e.button === 2;
+        state.isRightClick = (e as MouseEvent).button === 2;
         handleMouseMove(e as MouseEvent);
         e.preventDefault();
     });
     canvas.addEventListener('mouseup', () => {
-        if(state.isDrawing){
+        if (state.isDrawing) {
             state.isDrawing = false;
         }
     });
@@ -743,7 +486,6 @@ function simulationLoop(currentTime: number) {
 
     requestAnimationFrame(simulationLoop);
 }
-
 
 // ===== INITIALIZATION =====
 setupEventListeners();
