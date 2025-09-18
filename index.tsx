@@ -40,7 +40,6 @@ function initializeGrids(): void {
     runSimulation(0);
 }
 
-
 function runSimulation(simDeltaTimeMinutes: number): void {
     if (!ctx) return;
 
@@ -154,7 +153,6 @@ function simulationLoop(currentTime: number) {
 
     requestAnimationFrame(simulationLoop);
 }
-
 
 // ===== INITIALIZATION =====
 const eventCallbacks: SimulationEventCallbacks = {
