@@ -13,7 +13,6 @@ import {
     FOG_WIND_DISSIPATION,
     GRID_SIZE,
     LAPSE_RATE,
-    MONTHLY_TEMPS,
     SETTLEMENT_HEAT_RADIUS,
     SETTLEMENT_PROPERTIES,
     SHADOW_COOLING,
@@ -31,6 +30,8 @@ import {
     type SimulationState,
 } from './src/simulation/state';
 import { CLOUD_TYPES, PRECIP_TYPES } from './src/simulation/weatherTypes';
+import { calculateBaseTemperature } from './src/simulation/temperature';
+import { calculateCloudRadiation, updateCloudDynamics } from './src/simulation/clouds';
 import {
     clamp,
     describeSurface,
@@ -74,7 +75,7 @@ function bilinearInterpolate(grid: number[][], x: number, y: number): number {
 
 function advectGrid(
     grid: number[][],
-    windField: {x: number, y: number, speed: number}[][],
+    windField: { x: number; y: number; speed: number }[][],
     timeFactor: number
 ): number[][] {
     const newGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
@@ -86,370 +87,15 @@ function advectGrid(
             // Trace backward in time to find the source of the air
             const sourceX = x - wind.x * dt;
             const sourceY = y - wind.y * dt;
-            
+
             // Sample the value from the original grid at the source location
             const advectedValue = bilinearInterpolate(grid, sourceX, sourceY);
-            
+
             newGrid[y][x] = advectedValue;
         }
     }
     return newGrid;
 }
-
-
-// ===== CLOUD DYNAMICS SYSTEM =====
-
-// Step 1: Simple cloud coverage affecting solar radiation
-function calculateCloudCoverage(x: number, y: number, hour: number, humidity: number[][]): number {
-    // Base cloud coverage from humidity
-    let coverage = 0;
-    
-    // Higher humidity = more clouds
-    if (state.humidity[y][x] > 0.7) {
-        coverage = (state.humidity[y][x] - 0.7) / 0.3; // 0 to 1 scale
-    }
-    
-    // Increase cloud coverage in afternoon (convective development)
-    if (hour >= 12 && hour <= 17) {
-        const afternoonFactor = Math.sin((hour - 12) / 5 * Math.PI);
-        coverage += afternoonFactor * 0.3;
-    }
-    
-    // Increase clouds over water bodies (evaporation)
-    if (state.landCover[y][x] === LAND_TYPES.WATER) {
-        coverage += 0.2;
-    }
-    
-    return Math.min(1, coverage);
-}
-
-// Step 2: Orographic cloud formation
-function calculateOrographicClouds(x: number, y: number, windSpeed: number, windDir: number, humidity: number[][], temperature: number[][]): number {
-    if (windSpeed < 5) return 0; // Need wind for orographic lift
-    
-    const windDirRad = windDir * Math.PI / 180;
-    const windX = Math.sin(windDirRad);
-    const windY = -Math.cos(windDirRad);
-    
-    // Check if on windward side of slope
-    let isWindward = false;
-    let liftAmount = 0;
-    
-    if (isInBounds(x-1, y-1) && isInBounds(x+1, y+1)) {
-        const dzdx = (state.elevation[y][x + 1] - state.elevation[y][x - 1]) / (2 * CELL_SIZE);
-        const dzdy = (state.elevation[y + 1][x] - state.elevation[y - 1][x]) / (2 * CELL_SIZE);
-        
-        // Dot product of wind and upslope direction
-        const slopeDotWind = dzdx * windX + dzdy * windY;
-        
-        if (slopeDotWind > 0) {
-            isWindward = true;
-            liftAmount = slopeDotWind * windSpeed / 10;
-        }
-    }
-    
-    if (!isWindward) return 0;
-    
-    // Calculate lifting condensation level (LCL)
-    const dewPointDeficit = state.temperature[y][x] - state.dewPoint[y][x];
-    const LCL = 125 * dewPointDeficit; // Approximate LCL height in meters
-    
-    // If terrain forces air above LCL, clouds form
-    const forcedLift = liftAmount * 100; // Convert to meters
-    
-    if (forcedLift > LCL) {
-        const cloudIntensity = Math.min(1, (forcedLift - LCL) / 200);
-        return cloudIntensity;
-    }
-    
-    return 0;
-}
-
-// Step 3: Precipitation and moisture feedback (REVISED FOR REALISM)
-function calculatePrecipitation(x: number, y: number, cloudWater: number[][], cloudType: number[][], temperature: number[][]): {rate: number, type: number} {
-    let precipRate = 0; // rate in mm/hr
-    let precipType = PRECIP_TYPES.NONE;
-    const localCloudWater = state.cloudWater[y][x];
-
-    // No precipitation if there's very little cloud water
-    if (localCloudWater < 0.2) return { rate: 0, type: PRECIP_TYPES.NONE };
-
-    let precipEfficiency = 0;
-    let precipProbability = 0;
-
-    // Determine efficiency and probability based on cloud type
-    switch(state.cloudType[y][x]) {
-        case CLOUD_TYPES.CUMULUS:
-            precipProbability = Math.max(0, (localCloudWater - 0.5) / 0.5); 
-            precipEfficiency = 0.2;
-            break;
-        case CLOUD_TYPES.CUMULONIMBUS:
-            precipProbability = Math.max(0, (localCloudWater - 0.3) / 0.7);
-            precipEfficiency = 0.9;
-            break;
-        case CLOUD_TYPES.STRATUS:
-            precipProbability = Math.max(0, (localCloudWater - 0.2) / 0.8);
-            precipEfficiency = 0.15;
-            break;
-        case CLOUD_TYPES.OROGRAPHIC:
-            precipProbability = Math.max(0, (localCloudWater - 0.25) / 0.75);
-            precipEfficiency = 0.4;
-            break;
-    }
-
-    if (Math.random() < precipProbability) {
-        const randomFactor = 0.7 + Math.random() * 0.6;
-        precipRate = localCloudWater * precipEfficiency * randomFactor;
-    }
-
-    precipRate = Math.min(precipRate, 2.0); // Cap precipitation rate (e.g., 2 mm/hr)
-
-    if (precipRate > 0.01) {
-        if (state.temperature[y][x] > 2) {
-            precipType = PRECIP_TYPES.RAIN;
-        } else if (state.temperature[y][x] <= -5) {
-            precipType = PRECIP_TYPES.SNOW;
-        } else {
-            precipType = PRECIP_TYPES.SLEET;
-        }
-    } else {
-        precipRate = 0;
-        precipType = PRECIP_TYPES.NONE;
-    }
-
-    return { rate: precipRate, type: precipType };
-}
-
-// Step 4: Convective cloud development
-function calculateConvectiveClouds(
-    x: number,
-    y: number,
-    month: number,
-    hour: number,
-    surfaceTemp: number,
-    humidity: number[][]
-): {development: number, type: number, cape: number, thermalStrength: number} {
-    const baseTemp = calculateBaseTemperature(month, hour);
-    
-    let thermal = 0;
-    
-    if (hour >= 10 && hour <= 17) {
-        const tempExcess = surfaceTemp - baseTemp;
-        
-        if (state.landCover[y][x] === LAND_TYPES.URBAN) {
-            thermal = tempExcess * 1.3;
-        } else if (state.soilType[y][x] === SOIL_TYPES.SAND) {
-            thermal = tempExcess * 1.1;
-        } else if (state.landCover[y][x] === LAND_TYPES.GRASSLAND) {
-            thermal = tempExcess;
-        } else if (state.landCover[y][x] === LAND_TYPES.WATER || state.landCover[y][x] === LAND_TYPES.FOREST) {
-            thermal = tempExcess * 0.5;
-        }
-    }
-    
-    const CAPE = Math.max(0, thermal * humidity[y][x] * 100);
-    
-    let cloudDevelopment = 0;
-    let cloudTypeResult = CLOUD_TYPES.NONE;
-    
-    if (CAPE > 500) {
-        cloudDevelopment = Math.min(1, CAPE / 3000);
-        if (CAPE > 2000) {
-            cloudTypeResult = CLOUD_TYPES.CUMULONIMBUS;
-        } else {
-            cloudTypeResult = CLOUD_TYPES.CUMULUS;
-        }
-    }
-    
-    return { 
-        development: cloudDevelopment, 
-        type: cloudTypeResult,
-        cape: CAPE,
-        thermalStrength: thermal
-    };
-}
-
-// Step 5: Cloud microphysics
-function calculateCloudMicrophysics(x: number, y: number, cloudWater: number[][], temperature: number[][], updraftSpeed: number): {ice: number, dropletSize: number, precipEfficiency: number, graupel: number} {
-    let iceContent = state.iceContent[y][x];
-    let dropletSize = 5;
-    let precipitationEfficiency = 0;
-    
-    if (state.temperature[y][x] < 0 && state.cloudWater[y][x] > 0) {
-        const freezingRate = Math.exp(-state.temperature[y][x] / 10);
-        iceContent = state.cloudWater[y][x] * freezingRate;
-        state.cloudWater[y][x] *= (1 - freezingRate * 0.5);
-    }
-    
-    if (state.temperature[y][x] > 0 && state.cloudWater[y][x] > 0.3) {
-        dropletSize = 5 + updraftSpeed * 2;
-        if (dropletSize > 20) {
-            precipitationEfficiency = Math.min(1, dropletSize / 50);
-        }
-    }
-    
-    let graupelFormation = 0;
-    if (state.temperature[y][x] > -10 && state.temperature[y][x] < 0 && updraftSpeed > 5) {
-        graupelFormation = iceContent * 0.3;
-    }
-
-    return {
-        ice: iceContent,
-        dropletSize: dropletSize,
-        precipEfficiency: precipitationEfficiency,
-        graupel: graupelFormation
-    };
-}
-
-function calculateCloudRadiation(x: number, y: number, cloudCoverage: number[][], cloudOpticalDepth: number[][], sunAltitude: number): {solarTransmission: number, longwaveWarming: number} {
-    let solarTransmission = 1;
-    if (state.cloudCoverage[y][x] > 0) {
-        const opticalPath = state.cloudOpticalDepth[y][x] / Math.max(0.1, Math.sin(sunAltitude));
-        solarTransmission = (1 - state.cloudCoverage[y][x]) + 
-                           state.cloudCoverage[y][x] * Math.exp(-opticalPath);
-    }
-    
-    let longwaveEffect = 0;
-    if (state.cloudCoverage[y][x] > 0) {
-        longwaveEffect = state.cloudCoverage[y][x] * 3;
-    }
-    
-    return {
-        solarTransmission: solarTransmission,
-        longwaveWarming: longwaveEffect
-    };
-}
-
-function updateHumidity(x: number, y: number, temperature: number[][], windSpeed: number, precipRate: number, precipType: number, timeFactor: number): void {
-    let evaporationRate = 0; // rate in %/hr
-    
-    if (state.landCover[y][x] === LAND_TYPES.WATER) {
-        evaporationRate = 2.0 * Math.max(0, state.temperature[y][x] / 30) * (1 + windSpeed / 20);
-    } else if (state.landCover[y][x] === LAND_TYPES.FOREST) {
-        evaporationRate = 1.0 * Math.max(0, state.temperature[y][x] / 30);
-    } else if (state.soilMoisture[y][x] > 0) {
-        const thermalProps = getThermalProperties(x, y);
-        const soilEvap = state.soilMoisture[y][x] * thermalProps.evaporation;
-        evaporationRate = soilEvap * 1.0 * Math.max(0, state.temperature[y][x] / 30);
-    }
-    
-    let precipReductionRate = 0;
-    if (precipRate > 0 && precipType !== PRECIP_TYPES.SNOW) {
-        precipReductionRate = precipRate * 10; // 1mm/hr rain reduces humidity by 10%/hr
-    }
-
-    const humidityChange = (evaporationRate - precipReductionRate) * timeFactor / 100;
-    state.humidity[y][x] = clamp(state.humidity[y][x] + humidityChange, 0.01, 1);
-    
-    const a = 17.27;
-    const b = 237.7;
-    const relHumidity = state.humidity[y][x];
-    const gamma = Math.log(relHumidity) + (a * state.temperature[y][x]) / (b + state.temperature[y][x]);
-    state.dewPoint[y][x] = (b * gamma) / (a - gamma);
-}
-
-function updateCloudDynamics(month: number, hour: number, windSpeed: number, windDir: number, timeFactor: number): void {
-    if (timeFactor <= 0) return;
-
-    const sunAltitude = Math.max(0, Math.sin((hour - 6) * Math.PI / 12));
-    
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            const orographicFormationRate = calculateOrographicClouds(x, y, windSpeed, windDir, state.humidity, state.temperature) * 2.0; // rate in water/hr
-            
-            const convective = calculateConvectiveClouds(
-                x,
-                y,
-                month,
-                hour,
-                state.temperature[y][x],
-                state.humidity
-            );
-            const convectiveFormationRate = convective.development * 2.0;
-
-            state.convectiveEnergy[y][x] = convective.cape;
-            state.thermalStrength[y][x] = convective.thermalStrength;
-            
-            let cloudFormationRate = 0;
-            if (orographicFormationRate > 0.5) {
-                state.cloudType[y][x] = CLOUD_TYPES.OROGRAPHIC;
-                cloudFormationRate = orographicFormationRate;
-                state.cloudBase[y][x] = state.elevation[y][x] + 100;
-                state.cloudTop[y][x] = state.elevation[y][x] + 500 + orographicFormationRate * 1000;
-            } else if (convectiveFormationRate > 0.3) {
-                state.cloudType[y][x] = convective.type;
-                cloudFormationRate = convectiveFormationRate;
-                state.cloudBase[y][x] = state.elevation[y][x] + 500;
-                state.cloudTop[y][x] = state.elevation[y][x] + 500 + convective.cape;
-            } else if (state.fogDensity[y][x] > 0.5) {
-                state.cloudType[y][x] = CLOUD_TYPES.STRATUS;
-                cloudFormationRate = state.fogDensity[y][x] * 0.5;
-                state.cloudBase[y][x] = state.elevation[y][x];
-                state.cloudTop[y][x] = state.elevation[y][x] + 200;
-            } else {
-                state.cloudType[y][x] = CLOUD_TYPES.NONE;
-            }
-            
-            const solarDissipationRate = sunAltitude > 0 ? state.cloudWater[y][x] * sunAltitude * 0.8 : 0;
-            
-            const precip = calculatePrecipitation(x, y, state.cloudWater, state.cloudType, state.temperature);
-            const precipRate = precip.rate; // mm/hr
-            state.precipitation[y][x] = precipRate;
-            state.precipitationType[y][x] = precip.type;
-            const precipWaterLossRate = precipRate * 0.1;
-
-            const cloudWaterChange = (cloudFormationRate - solarDissipationRate - precipWaterLossRate) * timeFactor;
-            state.cloudWater[y][x] = clamp(state.cloudWater[y][x] + cloudWaterChange, 0, 1.5);
-            
-            state.cloudCoverage[y][x] = Math.min(1, state.cloudWater[y][x]);
-            state.cloudOpticalDepth[y][x] = state.cloudWater[y][x] * 10;
-            
-            updateHumidity(x, y, state.temperature, windSpeed, precipRate, precip.type, timeFactor);
-            
-            const updraft = state.thermalStrength[y][x] * 2;
-            const microphysics = calculateCloudMicrophysics(x, y, state.cloudWater, state.temperature, updraft);
-            state.iceContent[y][x] = microphysics.ice;
-            
-            if (precipRate > 0) {
-                 if (precip.type === PRECIP_TYPES.SNOW) {
-                    const snowAccumulation = precipRate * 10 * timeFactor;
-                    state.snowDepth[y][x] += snowAccumulation;
-                    state.latentHeatEffect[y][x] += precipRate * 0.8;
-                } else {
-                    const thermalProps = getThermalProperties(x, y);
-                    const infiltration = Math.min(precipRate * timeFactor, 1 - state.soilMoisture[y][x]);
-                    state.soilMoisture[y][x] += infiltration * thermalProps.waterRetention;
-                }
-            }
-        }
-    }
-    
-    smoothCloudFields();
-}
-
-function smoothCloudFields() {
-    const smoothed = state.cloudCoverage.map(row => [...row]);
-    
-    for (let y = 1; y < GRID_SIZE - 1; y++) {
-        for (let x = 1; x < GRID_SIZE - 1; x++) {
-            let sum = 0;
-            let count = 0;
-            
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                    sum += state.cloudCoverage[y + dy][x + dx];
-                    count++;
-                }
-            }
-            
-            smoothed[y][x] = sum / count;
-        }
-    }
-    
-    state.cloudCoverage = smoothed;
-}
-
-
 // ===== SNOW DYNAMICS =====
 function updateSnowCover(temperatureGrid: number[][], sunAltitude: number, timeFactor: number) {
     for (let y = 0; y < GRID_SIZE; y++) {
@@ -1208,21 +854,6 @@ function calculateHillshade(): void {
 }
 
 // ===== TEMPERATURE SIMULATION =====
-function calculateBaseTemperature(month: number, hour: number): number {
-    const monthTemp = MONTHLY_TEMPS[month - 1];
-    const isDayTime = hour >= 6 && hour <= 18;
-    
-    if (isDayTime) {
-        const hoursSinceSunrise = hour - 6;
-        const hourModifier = Math.sin((hoursSinceSunrise / 12) * Math.PI) * 6;
-        return monthTemp + hourModifier;
-    } else {
-        const nightHours = hour <= 6 ? hour + 6 : hour - 18;
-        const nightCooling = -2 - (nightHours / 12) * 2;
-        return monthTemp + nightCooling;
-    }
-}
-
 function calculateSolarInsolation(x: number, y: number, sunAltitude: number): number {
     if (sunAltitude <= 0 || !isInBounds(x-1, y-1) || !isInBounds(x+1, y+1)) {
         return 0;
@@ -1241,7 +872,7 @@ function calculateSolarInsolation(x: number, y: number, sunAltitude: number): nu
     
     let cloudReduction = 1;
     if (state.cloudCoverage && state.cloudCoverage[y] && state.cloudCoverage[y][x] > 0) {
-        const cloudRadiation = calculateCloudRadiation(x, y, state.cloudCoverage, state.cloudOpticalDepth, sunAltitude);
+        const cloudRadiation = calculateCloudRadiation(state, x, y, sunAltitude);
         cloudReduction = cloudRadiation.solarTransmission;
     }
     
@@ -1358,7 +989,13 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     }
 
     if (enableClouds) {
-        updateCloudDynamics(month, currentHour, windSpeed, windDir, timeFactor);
+        updateCloudDynamics(state, {
+            month,
+            hour: currentHour,
+            windSpeed,
+            windDir,
+            timeFactor,
+        });
     } else {
         state.cloudCoverage = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
         state.precipitation = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
