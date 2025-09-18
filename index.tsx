@@ -61,7 +61,6 @@ function initializeGrids(): void {
     runSimulation(0);
 }
 
-
 function runSimulation(simDeltaTimeMinutes: number): void {
     if (!ctx) return;
 
@@ -89,26 +88,14 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     const sunAltitude = Math.max(0, Math.sin(((currentHour + currentMinute / 60) - 6) * Math.PI / 12));
     const timeFactor = simDeltaTimeMinutes / 60.0;
 
-    state.latentHeatEffect = Array(GRID_SIZE)
-        .fill(null)
-        .map(() => Array(GRID_SIZE).fill(0));
+    state.latentHeatEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
 
     if (enableDownslope) {
         calculateDownslopeWinds(state, currentHour, windSpeed, windDir, windGustiness);
     } else {
-        state.downSlopeWinds = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
-        state.windVectorField = Array(GRID_SIZE)
-            .fill(null)
-            .map(() =>
-                Array(GRID_SIZE)
-                    .fill(null)
-                    .map(() => ({ x: 0, y: 0, speed: 0 }))
-            );
-        state.foehnEffect = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
+        state.downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({ x: 0, y: 0, speed: 0 })));
+        state.foehnEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     }
 
     if (enableAdvection && timeFactor > 0) {
@@ -126,15 +113,9 @@ function runSimulation(simDeltaTimeMinutes: number): void {
             timeFactor,
         });
     } else {
-        state.cloudCoverage = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
-        state.precipitation = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
-        state.thermalStrength = Array(GRID_SIZE)
-            .fill(null)
-            .map(() => Array(GRID_SIZE).fill(0));
+        state.cloudCoverage = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.precipitation = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+        state.thermalStrength = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     }
 
     if (enableInversions) {
@@ -182,7 +163,6 @@ function runSimulation(simDeltaTimeMinutes: number): void {
 function getTemperatureColor(temp: number): string {
     const minTemp = -10, maxTemp = 40;
     const normalized = clamp((temp - minTemp) / (maxTemp - minTemp), 0, 1);
-    
     const hue = (1 - normalized) * 240;
     return `hsl(${hue}, 80%, 50%)`;
 }
@@ -200,14 +180,13 @@ function drawGrid(): void {
     const showWind = (document.getElementById('showWindFlow') as HTMLInputElement).checked;
     const showSnow = (document.getElementById('showSnowCover') as HTMLInputElement).checked;
 
-
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
             ctx.fillStyle = getLandColor(state, x, y, showSoil);
             ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
         }
     }
-    
+
     if (showHillshade) {
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
@@ -217,9 +196,9 @@ function drawGrid(): void {
             }
         }
     }
-    
+
     if (showHeatmap) {
-         for (let y = 0; y < GRID_SIZE; y++) {
+        for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
                 const color = getTemperatureColor(state.temperature[y][x]);
                 ctx.globalAlpha = 0.6;
@@ -264,24 +243,24 @@ function drawGrid(): void {
                 if (wind.speed > 1) {
                     const centerX = x * CELL_SIZE + CELL_SIZE * 2;
                     const centerY = y * CELL_SIZE + CELL_SIZE * 2;
-                    
+
                     const angle = Math.atan2(wind.y, wind.x);
                     const length = Math.min(CELL_SIZE * 2, wind.speed);
-                    
+
                     if (state.foehnEffect[y][x] > 0.5) ctx.strokeStyle = 'red';
                     else if (state.downSlopeWinds[y][x] < -0.2) ctx.strokeStyle = 'blue';
                     else ctx.strokeStyle = 'white';
-                    
+
                     ctx.beginPath();
                     ctx.moveTo(centerX, centerY);
                     ctx.lineTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
                     ctx.stroke();
-                    
+
                     ctx.beginPath();
                     ctx.moveTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
-                    ctx.lineTo(centerX + Math.cos(angle - 0.5) * (length-4), centerY + Math.sin(angle - 0.5) * (length-4));
+                    ctx.lineTo(centerX + Math.cos(angle - 0.5) * (length - 4), centerY + Math.sin(angle - 0.5) * (length - 4));
                     ctx.moveTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
-                    ctx.lineTo(centerX + Math.cos(angle + 0.5) * (length-4), centerY + Math.sin(angle + 0.5) * (length-4));
+                    ctx.lineTo(centerX + Math.cos(angle + 0.5) * (length - 4), centerY + Math.sin(angle + 0.5) * (length - 4));
                     ctx.stroke();
                 }
             }
@@ -299,7 +278,7 @@ function handleMouseMove(e: MouseEvent): void {
         tooltip.style.display = 'block';
         tooltip.style.left = `${e.clientX + 15}px`;
         tooltip.style.top = `${e.clientY}px`;
-        
+
         const land = Object.keys(LAND_TYPES).find(key => LAND_TYPES[key as keyof typeof LAND_TYPES] === state.landCover[y][x]);
         const surface = describeSurface(state, x, y);
         tooltip.innerHTML = `
@@ -329,11 +308,11 @@ function drawOnCanvas(gridX: number, gridY: number): void {
         for (let x = gridX - state.brushSize; x <= gridX + state.brushSize; x++) {
             if (isInBounds(x, y) && distance(x, y, gridX, gridY) <= state.brushSize) {
                 const power = 1 - (distance(x, y, gridX, gridY) / state.brushSize);
-                
+
                 if (state.currentBrushCategory === 'terrain') {
                     const change = (state.isRightClick ? -state.terrainStrength : state.terrainStrength) * power;
                     state.elevation[y][x] = clamp(state.elevation[y][x] + change, 0, 1000);
-                     needsRecalculation = true;
+                    needsRecalculation = true;
                 } else if (state.currentBrushCategory === 'land') {
                     const landType = resolveLandType(state.currentBrush);
                     if (landType !== undefined) {
@@ -367,7 +346,7 @@ function drawOnCanvas(gridX: number, gridY: number): void {
             }
         }
     }
-    
+
     if (needsRecalculation) {
         if (state.currentBrushCategory === 'terrain') {
             calculateHillshade(state);
@@ -377,7 +356,7 @@ function drawOnCanvas(gridX: number, gridY: number): void {
             initializeSoilMoisture(state);
         }
     }
-    
+
     // When drawing, only update the static view, don't advance time.
     runSimulation(0);
 }
@@ -409,12 +388,12 @@ function setupEventListeners(): void {
             btn.classList.add('active');
             state.currentBrush = btn.getAttribute('data-brush')!;
             state.currentBrushCategory = btn.getAttribute('data-category')!;
-            
+
             const terrainStrengthGroup = document.getElementById('terrainStrengthGroup') as HTMLElement;
             terrainStrengthGroup.style.display = state.currentBrushCategory === 'terrain' ? 'block' : 'none';
         });
     });
-    
+
     // Re-couple climate settings to provide immediate feedback
     document.getElementById('month')?.addEventListener('change', () => runSimulation(0));
     document.getElementById('windDirection')?.addEventListener('change', () => runSimulation(0));
@@ -426,7 +405,7 @@ function setupEventListeners(): void {
         (document.getElementById('windGustinessValue') as HTMLElement).textContent = (e.target as HTMLInputElement).value;
         runSimulation(0);
     });
-    
+
     document.querySelectorAll('#controls input[type="checkbox"]').forEach(checkbox => {
         checkbox.addEventListener('change', () => {
             // Visualization checkboxes should redraw immediately.
@@ -475,15 +454,14 @@ function setupEventListeners(): void {
         (document.getElementById('speedValue') as HTMLElement).textContent = `${state.simulationSpeed}x`;
     });
 
-
     canvas.addEventListener('mousedown', e => {
         state.isDrawing = true;
-        state.isRightClick = e.button === 2;
+        state.isRightClick = (e as MouseEvent).button === 2;
         handleMouseMove(e as MouseEvent);
         e.preventDefault();
     });
     canvas.addEventListener('mouseup', () => {
-        if(state.isDrawing){
+        if (state.isDrawing) {
             state.isDrawing = false;
         }
     });
@@ -508,7 +486,6 @@ function simulationLoop(currentTime: number) {
 
     requestAnimationFrame(simulationLoop);
 }
-
 
 // ===== INITIALIZATION =====
 setupEventListeners();
