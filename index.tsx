@@ -12,15 +12,12 @@ import {
     FOG_TEMP_DISSIPATION,
     FOG_WIND_DISSIPATION,
     GRID_SIZE,
-    LAND_COLORS,
-    LAND_TYPE_MAP,
     LAPSE_RATE,
     MONTHLY_TEMPS,
     SETTLEMENT_HEAT_RADIUS,
     SETTLEMENT_PROPERTIES,
     SHADOW_COOLING,
     SOIL_PROPERTIES,
-    SOIL_TYPE_MAP,
     SOLAR_INTENSITY_FACTOR,
     URBAN_HEAT_RADIUS,
     URBAN_PROPERTIES,
@@ -34,6 +31,16 @@ import {
     type SimulationState,
 } from './src/simulation/state';
 import { CLOUD_TYPES, PRECIP_TYPES } from './src/simulation/weatherTypes';
+import {
+    clamp,
+    describeSurface,
+    distance,
+    getLandColor,
+    getThermalProperties,
+    isInBounds,
+    resolveLandType,
+    resolveSoilType,
+} from './src/simulation/utils';
 
 // ===== GLOBAL STATE =====
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -43,29 +50,6 @@ const tooltip = document.getElementById('tooltip') as HTMLElement;
 const state: SimulationState = createSimulationState();
 resizeCanvas(canvas);
 const SIM_MINUTES_PER_REAL_SECOND = 15; // At 1x speed, 1 real second = 15 sim minutes
-
-// ===== UTILITY FUNCTIONS =====
-function clamp(value: number, min: number, max: number): number {
-    return Math.max(min, Math.min(max, value));
-}
-
-function distance(x1: number, y1: number, x2: number, y2: number): number {
-    return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-}
-
-function isInBounds(x: number, y: number): boolean {
-    return x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE;
-}
-
-// Helper to get the correct thermal properties for a cell
-function getThermalProperties(x: number, y: number) {
-    const land = state.landCover[y][x];
-    if (land === LAND_TYPES.WATER) return WATER_PROPERTIES;
-    if (land === LAND_TYPES.URBAN) return URBAN_PROPERTIES;
-    if (land === LAND_TYPES.SETTLEMENT) return SETTLEMENT_PROPERTIES;
-    const soilType = state.soilType[y][x];
-    return SOIL_PROPERTIES[soilType] ?? SOIL_PROPERTIES[SOIL_TYPES.LOAM];
-}
 
 // ===== ATMOSPHERIC ADVECTION ENGINE =====
 function bilinearInterpolate(grid: number[][], x: number, y: number): number {
@@ -507,7 +491,7 @@ function calculateSnowEffects(x: number, y: number, sunAltitude: number): { albe
 function initializeSoilMoisture(): void {
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const thermalProps = getThermalProperties(x, y);
+            const thermalProps = getThermalProperties(state, x, y);
             let baseMoisture = thermalProps.waterRetention * 0.5;
             
             if (state.waterDistance[y][x] < 10) {
@@ -1564,8 +1548,7 @@ function drawGrid(): void {
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const color = showSoil ? getThermalProperties(x, y).color : LAND_COLORS[state.landCover[y][x]];
-            ctx.fillStyle = color;
+            ctx.fillStyle = getLandColor(state, x, y, showSoil);
             ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
         }
     }
@@ -1663,7 +1646,7 @@ function handleMouseMove(e: MouseEvent): void {
         tooltip.style.top = `${e.clientY}px`;
         
         const land = Object.keys(LAND_TYPES).find(key => LAND_TYPES[key as keyof typeof LAND_TYPES] === state.landCover[y][x]);
-        const surface = getThermalProperties(x, y).name;
+        const surface = describeSurface(state, x, y);
         tooltip.innerHTML = `
             <strong>Coords:</strong> ${x}, ${y}<br>
             <strong>Air Temp:</strong> ${state.temperature[y][x].toFixed(1)}°C<br>
@@ -1697,13 +1680,15 @@ function drawOnCanvas(gridX: number, gridY: number): void {
                     state.elevation[y][x] = clamp(state.elevation[y][x] + change, 0, 1000);
                      needsRecalculation = true;
                 } else if (state.currentBrushCategory === 'land') {
-                    if (LAND_TYPE_MAP[state.currentBrush] !== undefined) {
-                       state.landCover[y][x] = LAND_TYPE_MAP[state.currentBrush];
-                       needsRecalculation = true;
+                    const landType = resolveLandType(state.currentBrush);
+                    if (landType !== undefined) {
+                        state.landCover[y][x] = landType;
+                        needsRecalculation = true;
                     }
                 } else if (state.currentBrushCategory === 'soil') {
-                    if (SOIL_TYPE_MAP[state.currentBrush] !== undefined) {
-                        state.soilType[y][x] = SOIL_TYPE_MAP[state.currentBrush];
+                    const soilType = resolveSoilType(state.currentBrush);
+                    if (soilType !== undefined) {
+                        state.soilType[y][x] = soilType;
                         needsRecalculation = true;
                     }
                 } else if (state.currentBrushCategory === 'action') {
