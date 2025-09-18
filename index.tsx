@@ -1,16 +1,8 @@
 import {
     BASE_ELEVATION,
     CELL_SIZE,
-    COLD_AIR_FLOW_INTENSITY,
     DIFFUSION_ITERATIONS,
     DIFFUSION_RATE,
-    EPSILON,
-    FOG_ADVECTION_RATE,
-    FOG_DIFFUSION_RATE,
-    FOG_DOWNSLOPE_RATE,
-    FOG_SUN_DISSIPATION,
-    FOG_TEMP_DISSIPATION,
-    FOG_WIND_DISSIPATION,
     GRID_SIZE,
     LAPSE_RATE,
     SETTLEMENT_HEAT_RADIUS,
@@ -32,6 +24,10 @@ import {
 import { CLOUD_TYPES, PRECIP_TYPES } from './src/simulation/weatherTypes';
 import { calculateBaseTemperature } from './src/simulation/temperature';
 import { calculateCloudRadiation, updateCloudDynamics } from './src/simulation/clouds';
+import { advectGrid, calculateDownslopeWinds } from './src/simulation/wind';
+import { updateFogSimulation } from './src/simulation/fog';
+import { initializeSoilMoisture } from './src/simulation/soil';
+import { calculateSnowEffects, updateSnowCover } from './src/simulation/snow';
 import {
     clamp,
     describeSurface,
@@ -51,440 +47,6 @@ const tooltip = document.getElementById('tooltip') as HTMLElement;
 const state: SimulationState = createSimulationState();
 resizeCanvas(canvas);
 const SIM_MINUTES_PER_REAL_SECOND = 15; // At 1x speed, 1 real second = 15 sim minutes
-
-// ===== ATMOSPHERIC ADVECTION ENGINE =====
-function bilinearInterpolate(grid: number[][], x: number, y: number): number {
-    const x1 = Math.floor(x);
-    const y1 = Math.floor(y);
-    const x2 = Math.ceil(x);
-    const y2 = Math.ceil(y);
-    const xFrac = x - x1;
-    const yFrac = y - y1;
-
-    // Boundary checks
-    const p11 = isInBounds(x1, y1) ? grid[y1][x1] : 0;
-    const p12 = isInBounds(x1, y2) ? grid[y2][x1] : 0;
-    const p21 = isInBounds(x2, y1) ? grid[y1][x2] : 0;
-    const p22 = isInBounds(x2, y2) ? grid[y2][x2] : 0;
-
-    const val1 = p11 * (1 - yFrac) + p12 * yFrac;
-    const val2 = p21 * (1 - yFrac) + p22 * yFrac;
-
-    return val1 * (1 - xFrac) + val2 * xFrac;
-}
-
-function advectGrid(
-    grid: number[][],
-    windField: { x: number; y: number; speed: number }[][],
-    timeFactor: number
-): number[][] {
-    const newGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    const dt = timeFactor * 5; // Advection time step scaling factor
-
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            const wind = windField[y][x];
-            // Trace backward in time to find the source of the air
-            const sourceX = x - wind.x * dt;
-            const sourceY = y - wind.y * dt;
-
-            // Sample the value from the original grid at the source location
-            const advectedValue = bilinearInterpolate(grid, sourceX, sourceY);
-
-            newGrid[y][x] = advectedValue;
-        }
-    }
-    return newGrid;
-}
-// ===== SNOW DYNAMICS =====
-function updateSnowCover(temperatureGrid: number[][], sunAltitude: number, timeFactor: number) {
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            if (state.snowDepth[y][x] > 0) {
-                if (temperatureGrid[y][x] > 0) {
-                    const meltRate = (temperatureGrid[y][x] * 0.5 + sunAltitude * 2.0);
-                    const latentCooling = -Math.min(temperatureGrid[y][x], meltRate * 0.15);
-                    temperatureGrid[y][x] += latentCooling;
-                    state.snowDepth[y][x] = Math.max(0, state.snowDepth[y][x] - meltRate * timeFactor);
-                    const meltwater = Math.min(meltRate * timeFactor / 10, 1 - state.soilMoisture[y][x]);
-                    state.soilMoisture[y][x] += meltwater;
-
-                }
-                if (sunAltitude > 0) {
-                     state.snowDepth[y][x] = Math.max(0, state.snowDepth[y][x] - sunAltitude * 0.05 * timeFactor);
-                }
-            }
-        }
-    }
-}
-
-function calculateSnowEffects(x: number, y: number, sunAltitude: number): { albedoEffect: number, insulationEffect: number } {
-    if (state.snowDepth[y][x] <= 0) {
-        return { albedoEffect: 0, insulationEffect: 0 };
-    }
-
-    const snowAlbedo = 0.8;
-    const effectiveAlbedo = snowAlbedo * Math.min(1, state.snowDepth[y][x] / 10);
-    const albedoCooling = -effectiveAlbedo * sunAltitude * SOLAR_INTENSITY_FACTOR * 1.5;
-
-    const insulationFactor = Math.min(1, state.snowDepth[y][x] / 20);
-
-    return { albedoEffect: albedoCooling, insulationEffect: insulationFactor };
-}
-
-
-// ===== SOIL THERMAL DYNAMICS =====
-function initializeSoilMoisture(): void {
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            const thermalProps = getThermalProperties(state, x, y);
-            let baseMoisture = thermalProps.waterRetention * 0.5;
-            
-            if (state.waterDistance[y][x] < 10) {
-                baseMoisture += (10 - state.waterDistance[y][x]) / 10 * 0.3;
-            }
-            
-            if (isInBounds(x-1, y-1) && isInBounds(x+1, y+1)) {
-                const slope = Math.abs(state.elevation[y][x] - state.elevation[y-1][x]) + 
-                             Math.abs(state.elevation[y][x] - state.elevation[y+1][x]);
-                if (slope > 20) {
-                    baseMoisture *= 0.7;
-                }
-            }
-            
-            state.soilMoisture[y][x] = Math.min(1, baseMoisture);
-        }
-    }
-}
-
-// ===== DOWNSLOPE WIND CALCULATIONS =====
-function calculateDownslopeWinds(hour: number, baseWindSpeed: number, windDir: number, windGustiness: number): void {
-    state.downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    state.windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
-    state.foehnEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    
-    const isNightTime = hour <= 6 || hour >= 19;
-    const windDirRad = windDir * Math.PI / 180;
-    
-    for (let y = 2; y < GRID_SIZE - 2; y++) {
-        for (let x = 2; x < GRID_SIZE - 2; x++) {
-            const dzdx = (state.elevation[y][x + 2] - state.elevation[y][x - 2]) / (4 * CELL_SIZE);
-            const dzdy = (state.elevation[y + 2][x] - state.elevation[y - 2][x]) / (4 * CELL_SIZE);
-            
-            const slope = Math.sqrt(dzdx * dzdx + dzdy * dzdy);
-            const slopeAngle = Math.atan(slope);
-            
-            if (isNightTime && slopeAngle > 0.1) {
-                const katabaticStrength = Math.min(1, slopeAngle / 0.5) * (1 - baseWindSpeed / 30);
-                
-                let isSurfaceSlope = true;
-                for (let d = 1; d <= 2; d++) {
-                    const checkX = Math.round(x - dzdx * d);
-                    const checkY = Math.round(y - dzdy * d);
-                    if (isInBounds(checkX, checkY)) {
-                        const elevDiff = Math.abs(state.elevation[checkY][checkX] - state.elevation[y][x]);
-                        if (elevDiff > 30) {
-                            isSurfaceSlope = false;
-                            break;
-                        }
-                    }
-                }
-                
-                if (isSurfaceSlope) {
-                    const coldAirFlow = katabaticStrength * 0.8;
-                    if (slope > EPSILON) {
-                        state.windVectorField[y][x].x = -dzdx / slope * coldAirFlow * 5;
-                        state.windVectorField[y][x].y = -dzdy / slope * coldAirFlow * 5;
-                        state.windVectorField[y][x].speed = coldAirFlow * 5;
-                        state.downSlopeWinds[y][x] = -coldAirFlow * 1.5;
-                    }
-                }
-            }
-            
-            if (baseWindSpeed > 10 && slopeAngle > 0.15) {
-                const windX = Math.sin(windDirRad);
-                const windY = -Math.cos(windDirRad);
-                
-                let isLeeSide = false;
-                let maxUpwindHeight = state.elevation[y][x];
-                
-                for (let d = 1; d <= 10; d++) {
-                    const checkX = Math.round(x - windX * d);
-                    const checkY = Math.round(y - windY * d);
-                    
-                    if (isInBounds(checkX, checkY)) {
-                        if (state.elevation[checkY][checkX] > maxUpwindHeight + 20) {
-                            isLeeSide = true;
-                            maxUpwindHeight = state.elevation[checkY][checkX];
-                        }
-                    }
-                }
-                
-                if (isLeeSide) {
-                    const descentHeight = maxUpwindHeight - state.elevation[y][x];
-                    const adiabaticWarming = descentHeight * 0.01;
-                    const foehnStrength = Math.min(1, descentHeight / 100) * (baseWindSpeed / 30);
-                    state.foehnEffect[y][x] = Math.min(12, adiabaticWarming * foehnStrength);
-                    
-                    state.windVectorField[y][x].x += windX * foehnStrength * 10;
-                    state.windVectorField[y][x].y += windY * foehnStrength * 10;
-                    state.windVectorField[y][x].speed = Math.sqrt(
-                        state.windVectorField[y][x].x * state.windVectorField[y][x].x + 
-                        state.windVectorField[y][x].y * state.windVectorField[y][x].y
-                    );
-                }
-            }
-            
-            let higherNeighbors = 0;
-            const valleyCheckRadius = 5;
-            for (let dy = -valleyCheckRadius; dy <= valleyCheckRadius; dy++) {
-                for (let dx = -valleyCheckRadius; dx <= valleyCheckRadius; dx++) {
-                    if (dx === 0 && dy === 0) continue;
-                    const nx = x + dx;
-                    const ny = y + dy;
-                    if (isInBounds(nx, ny) && state.elevation[ny][nx] > state.elevation[y][x] + 25) {
-                        higherNeighbors++;
-                    }
-                }
-            }
-
-            const totalNeighbors = Math.pow(valleyCheckRadius * 2 + 1, 2) - 1;
-            if (higherNeighbors > totalNeighbors * 0.4) {
-                let exits: { elev: number, x: number, y: number }[] = [];
-                for (let angle = 0; angle < 2 * Math.PI; angle += Math.PI / 8) {
-                    const nx = Math.round(x + valleyCheckRadius * Math.cos(angle));
-                    const ny = Math.round(y + valleyCheckRadius * Math.sin(angle));
-                    if (isInBounds(nx, ny)) {
-                        exits.push({ elev: state.elevation[ny][nx], x: nx, y: ny });
-                    }
-                }
-                exits.sort((a, b) => a.elev - b.elev);
-                const lowestExits = exits.slice(0, Math.max(2, Math.floor(exits.length / 3)));
-
-                let bestPair = { p1: null as any, p2: null as any, dist: 0 };
-                if (lowestExits.length >= 2) {
-                    for (let i = 0; i < lowestExits.length; i++) {
-                        for (let j = i + 1; j < lowestExits.length; j++) {
-                            const p1 = lowestExits[i]; const p2 = lowestExits[j];
-                            const distSq = (p1.x - p2.x)**2 + (p1.y - p2.y)**2;
-                            if (distSq > bestPair.dist) {
-                                bestPair = { p1, p2, dist: distSq };
-                            }
-                        }
-                    }
-                }
-                
-                let axisVec = {x: 0, y: 0};
-                if (bestPair.p1) {
-                    axisVec = {x: bestPair.p2.x - bestPair.p1.x, y: bestPair.p2.y - bestPair.p1.y};
-                }
-
-                const axisMag = Math.sqrt(axisVec.x * axisVec.x + axisVec.y * axisVec.y);
-                if (axisMag > EPSILON) {
-                    const valleyDirection = {x: axisVec.x / axisMag, y: axisVec.y / axisMag};
-
-                    let valleyWidth = 0;
-                    const perpVec = {x: -valleyDirection.y, y: valleyDirection.x};
-                    for (const sign of [-1, 1]) {
-                        for (let d = 1; d < 15; d++) {
-                            const checkX = Math.round(x + perpVec.x * d * sign);
-                            const checkY = Math.round(y + perpVec.y * d * sign);
-                            if (!isInBounds(checkX, checkY) || state.elevation[checkY][checkX] > state.elevation[y][x] + 30) {
-                                valleyWidth += d; break;
-                            }
-                            if (d === 14) valleyWidth += d;
-                        }
-                    }
-
-                    const windX = Math.sin(windDirRad);
-                    const windY = -Math.cos(windDirRad);
-                    const alignment = windX * valleyDirection.x + windY * valleyDirection.y;
-                    
-                    const narrownessFactor = Math.max(0, (15 - valleyWidth) / 15);
-                    const venturiMultiplier = 1.0 + narrownessFactor * 1.2;
-                    
-                    const channelStrength = 0.4 + narrownessFactor * 0.6;
-                    
-                    const baseValleySpeed = baseWindSpeed * Math.abs(alignment);
-                    const finalValleySpeed = baseValleySpeed * venturiMultiplier;
-                    
-                    const channeledVecX = valleyDirection.x * Math.sign(alignment || 1);
-                    const channeledVecY = valleyDirection.y * Math.sign(alignment || 1);
-                    
-                    const blendedVecX = (windX * (1 - channelStrength)) + (channeledVecX * channelStrength);
-                    const blendedVecY = (windY * (1 - channelStrength)) + (channeledVecY * channelStrength);
-                    
-                    state.windVectorField[y][x].x += blendedVecX * finalValleySpeed * 0.8;
-                    state.windVectorField[y][x].y += blendedVecY * finalValleySpeed * 0.8;
-                }
-            }
-        }
-    }
-
-    if (windGustiness > 0) {
-        for (let y = 1; y < GRID_SIZE - 1; y++) {
-            for (let x = 1; x < GRID_SIZE - 1; x++) {
-                let roughness = 0;
-                let elevSum = 0;
-                let elevSqSum = 0;
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dx = -1; dx <= 1; dx++) {
-                        const elev = state.elevation[y+dy][x+dx];
-                        elevSum += elev;
-                        elevSqSum += elev * elev;
-                    }
-                }
-                const avgElev = elevSum / 9;
-                const stdDev = Math.sqrt(elevSqSum / 9 - avgElev * avgElev);
-                roughness = stdDev / 20;
-
-                const thermalTurbulence = (state.thermalStrength[y][x] || 0) / 15;
-
-                const gustFactor = (windGustiness / 100) * (1 + roughness + thermalTurbulence);
-                const localWindSpeed = Math.sqrt(state.windVectorField[y][x].x**2 + state.windVectorField[y][x].y**2) + baseWindSpeed;
-                const gustMagnitude = localWindSpeed * gustFactor * 0.5;
-
-                state.windVectorField[y][x].x += (Math.random() - 0.5) * 2 * gustMagnitude;
-                state.windVectorField[y][x].y += (Math.random() - 0.5) * 2 * gustMagnitude;
-            }
-        }
-    }
-    
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            const vec = state.windVectorField[y][x];
-            vec.speed = Math.sqrt(vec.x * vec.x + vec.y * vec.y);
-        }
-    }
-
-    smoothWindField();
-}
-
-function smoothWindField(): void {
-    const smoothed: {x: number, y: number, speed: number}[][] = Array(GRID_SIZE).fill(null).map(() => 
-        Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0}))
-    );
-    
-    for (let y = 1; y < GRID_SIZE - 1; y++) {
-        for (let x = 1; x < GRID_SIZE - 1; x++) {
-            let sumX = 0, sumY = 0, count = 0;
-            
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                    const weight = (dx === 0 && dy === 0) ? 4 : 1;
-                    sumX += state.windVectorField[y + dy][x + dx].x * weight;
-                    sumY += state.windVectorField[y + dy][x + dx].y * weight;
-                    count += weight;
-                }
-            }
-            
-            smoothed[y][x].x = sumX / count;
-            smoothed[y][x].y = sumY / count;
-            smoothed[y][x].speed = Math.sqrt(smoothed[y][x].x * smoothed[y][x].x + smoothed[y][x].y * smoothed[y][x].y);
-        }
-    }
-    
-    for (let y = 1; y < GRID_SIZE - 1; y++) {
-        for (let x = 1; x < GRID_SIZE - 1; x++) {
-            state.windVectorField[y][x] = smoothed[y][x];
-        }
-    }
-}
-
-// ===== DYNAMIC FOG SIMULATION =====
-function updateFogSimulation(hour: number, sunAltitude: number, timeFactor: number) {
-    if (timeFactor <= 0) return;
-
-    let fogChangeRate: number[][] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-
-    // Step 1: Calculate formation and dissipation rates
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            let formationRate = 0;
-            let dissipationRate = 0;
-
-            if (state.inversionStrength > 0 && state.elevation[y][x] < state.inversionHeight) {
-                const depth = (state.inversionHeight - state.elevation[y][x]) / 100;
-                formationRate += state.inversionStrength * depth * 0.5;
-            }
-
-            if (state.temperature[y][x] < state.dewPoint[y][x] + 2) {
-                const saturation = (state.dewPoint[y][x] + 2 - state.temperature[y][x]) / 4;
-                formationRate += saturation * state.humidity[y][x];
-            }
-            
-            if (sunAltitude <= 0 && state.waterDistance[y][x] < 5) {
-                formationRate += (5 - state.waterDistance[y][x]) / 5 * 0.3 * (1 - state.windVectorField[y][x].speed / 20);
-            }
-
-            if (sunAltitude > 0) {
-                dissipationRate += sunAltitude * FOG_SUN_DISSIPATION;
-            }
-
-            dissipationRate += state.windVectorField[y][x].speed * FOG_WIND_DISSIPATION;
-            
-            if (state.temperature[y][x] > state.dewPoint[y][x]) {
-                dissipationRate += (state.temperature[y][x] - state.dewPoint[y][x]) * FOG_TEMP_DISSIPATION;
-            }
-
-            fogChangeRate[y][x] = formationRate - dissipationRate;
-        }
-    }
-    
-    // Step 2: Apply changes and advection
-    let newFogDensity = state.fogDensity.map(row => [...row]);
-    for (let y = 1; y < GRID_SIZE - 1; y++) {
-        for (let x = 1; x < GRID_SIZE - 1; x++) {
-            // Apply local formation/dissipation
-            newFogDensity[y][x] += fogChangeRate[y][x] * timeFactor;
-
-            // Advection
-            const wind = state.windVectorField[y][x];
-            if (wind.speed > 0.5) {
-                const upwindX = clamp(Math.round(x - wind.x * 0.2), 0, GRID_SIZE - 1);
-                const upwindY = clamp(Math.round(y - wind.y * 0.2), 0, GRID_SIZE - 1);
-                const advectionChange = (state.fogDensity[upwindY][upwindX] - state.fogDensity[y][x]) * FOG_ADVECTION_RATE * Math.min(1, wind.speed / 10);
-                newFogDensity[y][x] += advectionChange * timeFactor;
-            }
-            
-            // Downslope creep
-            let highNeighborFog = 0;
-            let elevDiffSum = 0;
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                    if (dx === 0 && dy === 0) continue;
-                    const nx = x + dx;
-                    const ny = y + dy;
-                    const elevDiff = state.elevation[ny][nx] - state.elevation[y][x];
-                    if (elevDiff > 0) {
-                        highNeighborFog += state.fogDensity[ny][nx] * elevDiff;
-                        elevDiffSum += elevDiff;
-                    }
-                }
-            }
-            if (elevDiffSum > 0) {
-                const avgHighNeighborFog = highNeighborFog / elevDiffSum;
-                const downslopeChange = (avgHighNeighborFog - state.fogDensity[y][x]) * FOG_DOWNSLOPE_RATE;
-                newFogDensity[y][x] += downslopeChange * timeFactor;
-            }
-
-            // Diffusion
-            const avgNeighborFog = (
-                state.fogDensity[y - 1][x] + state.fogDensity[y + 1][x] +
-                state.fogDensity[y][x - 1] + state.fogDensity[y][x + 1]
-            ) / 4;
-            const diffusionChange = (avgNeighborFog - state.fogDensity[y][x]) * FOG_DIFFUSION_RATE;
-            newFogDensity[y][x] += diffusionChange * timeFactor;
-        }
-    }
-
-    for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            state.fogDensity[y][x] = clamp(newFogDensity[y][x], 0, 1);
-        }
-    }
-}
-
 
 // ===== TEMPERATURE INVERSION CALCULATIONS =====
 function calculateInversionLayer(hour: number, windSpeed: number, cloudCover = 0): void {
@@ -758,7 +320,7 @@ function initializeGrids(): void {
     addInitialFeatures();
     calculateContiguousAreas();
     calculateDistanceFields();
-    initializeSoilMoisture();
+    initializeSoilMoisture(state);
     calculateHillshade();
     
     runSimulation(0);
@@ -974,7 +536,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     state.latentHeatEffect = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
     
     if (enableDownslope) {
-        calculateDownslopeWinds(currentHour, windSpeed, windDir, windGustiness);
+        calculateDownslopeWinds(state, currentHour, windSpeed, windDir, windGustiness);
     } else {
         state.downSlopeWinds = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
         state.windVectorField = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => ({x: 0, y: 0, speed: 0})));
@@ -1010,7 +572,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
         state.inversionStrength = 0;
     }
     
-    updateFogSimulation(currentHour, sunAltitude, timeFactor);
+    updateFogSimulation(state, currentHour, sunAltitude, timeFactor);
     
     calculatePhysicsRates(month, currentHour, enableInversions, enableDownslope);
 
@@ -1027,7 +589,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
                 let airEnergyBalance = 0;
                 let soilEnergyBalance = 0;
 
-                const snowEffects = calculateSnowEffects(x, y, sunAltitude);
+                const snowEffects = calculateSnowEffects(state, x, y, sunAltitude);
                 
                 // --- Solar Heating ---
                 if (sunAltitude > 0) {
@@ -1099,7 +661,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
         }
     }
     
-    updateSnowCover(newTemperature, sunAltitude, timeFactor);
+    updateSnowCover(state, newTemperature, sunAltitude, timeFactor);
 
     if (enableDiffusion) {
         for (let i = 0; i < DIFFUSION_ITERATIONS; i++) {
@@ -1356,7 +918,7 @@ function drawOnCanvas(gridX: number, gridY: number): void {
         } else {
             calculateContiguousAreas();
             calculateDistanceFields();
-            initializeSoilMoisture();
+            initializeSoilMoisture(state);
         }
     }
     

@@ -1,10 +1,10 @@
 import { BASE_ELEVATION, CELL_SIZE, GRID_SIZE } from '../shared/constants';
 
-type VectorFieldCell = { x: number; y: number; speed: number };
+export type VectorFieldCell = { x: number; y: number; speed: number };
 
 type Grid = number[][];
 
-type VectorField = VectorFieldCell[][];
+export type VectorField = VectorFieldCell[][];
 
 function createGrid(initialValue: number): Grid {
   return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(initialValue));
