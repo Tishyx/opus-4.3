@@ -328,7 +328,7 @@ function updateHumidity(x: number, y: number, temperature: number[][], windSpeed
     } else if (state.landCover[y][x] === LAND_TYPES.FOREST) {
         evaporationRate = 1.0 * Math.max(0, state.temperature[y][x] / 30);
     } else if (state.soilMoisture[y][x] > 0) {
-        const thermalProps = getThermalProperties(state, x, y);
+        const thermalProps = getThermalProperties(x, y);
         const soilEvap = state.soilMoisture[y][x] * thermalProps.evaporation;
         evaporationRate = soilEvap * 1.0 * Math.max(0, state.temperature[y][x] / 30);
     }
@@ -416,7 +416,7 @@ function updateCloudDynamics(month: number, hour: number, windSpeed: number, win
                     state.snowDepth[y][x] += snowAccumulation;
                     state.latentHeatEffect[y][x] += precipRate * 0.8;
                 } else {
-                    const thermalProps = getThermalProperties(state, x, y);
+                    const thermalProps = getThermalProperties(x, y);
                     const infiltration = Math.min(precipRate * timeFactor, 1 - state.soilMoisture[y][x]);
                     state.soilMoisture[y][x] += infiltration * thermalProps.waterRetention;
                 }
@@ -1385,7 +1385,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
             for (let x = 0; x < GRID_SIZE; x++) {
                 const prevAirTemp = state.temperature[y][x];
                 const prevSoilTemp = state.soilTemperature[y][x];
-                const thermalProps = getThermalProperties(state, x, y);
+                const thermalProps = getThermalProperties(x, y);
 
                 let airEnergyBalance = 0;
                 let soilEnergyBalance = 0;
