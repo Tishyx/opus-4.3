@@ -1,7 +1,7 @@
 import { CELL_SIZE, EPSILON, GRID_SIZE } from '../shared/constants';
 import { LAND_TYPES } from '../shared/types';
 import { resetGrid, type SimulationState, type VectorField } from './state';
-import { isInBounds } from './utils';
+import { clamp, computeBoundaryDamping, isInBounds } from './utils';
 
 type ExitPoint = { elev: number; x: number; y: number };
 
@@ -51,19 +51,9 @@ export function applyBaseWindField(
   }
 }
 
-function clampCoord(value: number): number {
-  if (value < 0) {
-    return 0;
-  }
-  if (value > GRID_SIZE - 1) {
-    return GRID_SIZE - 1;
-  }
-  return value;
-}
-
 function bilinearInterpolate(grid: number[][], x: number, y: number): number {
-  const clampedX = clampCoord(x);
-  const clampedY = clampCoord(y);
+  const clampedX = clamp(x, 0, GRID_SIZE - 1);
+  const clampedY = clamp(y, 0, GRID_SIZE - 1);
 
   const x1 = Math.floor(clampedX);
   const y1 = Math.floor(clampedY);
@@ -80,7 +70,8 @@ function bilinearInterpolate(grid: number[][], x: number, y: number): number {
   const val1 = p11 * (1 - yFrac) + p12 * yFrac;
   const val2 = p21 * (1 - yFrac) + p22 * yFrac;
 
-  return val1 * (1 - xFrac) + val2 * xFrac;
+  const interpolated = val1 * (1 - xFrac) + val2 * xFrac;
+  return interpolated * computeBoundaryDamping(x, y);
 }
 
 export function advectGrid(
@@ -96,8 +87,8 @@ export function advectGrid(
   for (let y = 0; y < GRID_SIZE; y++) {
     for (let x = 0; x < GRID_SIZE; x++) {
       const wind = windField[y][x];
-      const sourceX = clampCoord(x - wind.x * dt);
-      const sourceY = clampCoord(y - wind.y * dt);
+      const sourceX = x - wind.x * dt;
+      const sourceY = y - wind.y * dt;
 
       newGrid[y][x] = bilinearInterpolate(grid, sourceX, sourceY);
     }
@@ -324,29 +315,35 @@ function smoothWindField(state: SimulationState): void {
     .fill(null)
     .map(() => Array(GRID_SIZE).fill(null).map(() => ({ x: 0, y: 0, speed: 0 })));
 
-  for (let y = 1; y < GRID_SIZE - 1; y++) {
-    for (let x = 1; x < GRID_SIZE - 1; x++) {
+  for (let y = 0; y < GRID_SIZE; y++) {
+    for (let x = 0; x < GRID_SIZE; x++) {
       let sumX = 0;
       let sumY = 0;
       let count = 0;
 
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (!isInBounds(nx, ny)) {
+            continue;
+          }
           const weight = dx === 0 && dy === 0 ? 4 : 1;
-          sumX += state.windVectorField[y + dy][x + dx].x * weight;
-          sumY += state.windVectorField[y + dy][x + dx].y * weight;
+          sumX += state.windVectorField[ny][nx].x * weight;
+          sumY += state.windVectorField[ny][nx].y * weight;
           count += weight;
         }
       }
 
-      smoothed[y][x].x = sumX / count;
-      smoothed[y][x].y = sumY / count;
+      const weightSafe = count > 0 ? count : 1;
+      smoothed[y][x].x = sumX / weightSafe;
+      smoothed[y][x].y = sumY / weightSafe;
       smoothed[y][x].speed = Math.sqrt(smoothed[y][x].x * smoothed[y][x].x + smoothed[y][x].y * smoothed[y][x].y);
     }
   }
 
-  for (let y = 1; y < GRID_SIZE - 1; y++) {
-    for (let x = 1; x < GRID_SIZE - 1; x++) {
+  for (let y = 0; y < GRID_SIZE; y++) {
+    for (let x = 0; x < GRID_SIZE; x++) {
       state.windVectorField[y][x] = smoothed[y][x];
     }
   }

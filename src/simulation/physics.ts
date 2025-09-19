@@ -87,12 +87,29 @@ export function calculateSolarInsolation(
     y: number,
     sunAltitude: number
 ): number {
-    if (sunAltitude <= 0 || !isInBounds(x - 1, y - 1) || !isInBounds(x + 1, y + 1)) {
+    if (sunAltitude <= 0) {
         return 0;
     }
 
-    const dzdx = (state.elevation[y][x + 1] - state.elevation[y][x - 1]) / (2 * CELL_SIZE);
-    const dzdy = (state.elevation[y + 1][x] - state.elevation[y - 1][x]) / (2 * CELL_SIZE);
+    const centerElev = state.elevation[y][x];
+
+    const leftElev = x > 0 ? state.elevation[y][x - 1] : centerElev;
+    const rightElev = x < GRID_SIZE - 1 ? state.elevation[y][x + 1] : centerElev;
+    const dzdx =
+        x > 0 && x < GRID_SIZE - 1
+            ? (rightElev - leftElev) / (2 * CELL_SIZE)
+            : x === 0
+              ? (rightElev - centerElev) / CELL_SIZE
+              : (centerElev - leftElev) / CELL_SIZE;
+
+    const topElev = y > 0 ? state.elevation[y - 1][x] : centerElev;
+    const bottomElev = y < GRID_SIZE - 1 ? state.elevation[y + 1][x] : centerElev;
+    const dzdy =
+        y > 0 && y < GRID_SIZE - 1
+            ? (bottomElev - topElev) / (2 * CELL_SIZE)
+            : y === 0
+              ? (bottomElev - centerElev) / CELL_SIZE
+              : (centerElev - topElev) / CELL_SIZE;
 
     const slope = Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy));
     const aspect = Math.atan2(-dzdy, dzdx);
@@ -264,16 +281,20 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
     updateSnowCover(state, newTemperature, sunAltitude, timeFactor);
 
     if (enableDiffusion) {
+        const sampleTemperature = (grid: number[][], sx: number, sy: number) => {
+            const clampedX = clamp(sx, 0, GRID_SIZE - 1);
+            const clampedY = clamp(sy, 0, GRID_SIZE - 1);
+            return grid[clampedY][clampedX];
+        };
         for (let i = 0; i < DIFFUSION_ITERATIONS; i++) {
             const diffusedTemp = newTemperature.map(row => [...row]);
-            for (let y = 1; y < GRID_SIZE - 1; y++) {
-                for (let x = 1; x < GRID_SIZE - 1; x++) {
-                    const avgNeighborTemp =
-                        (newTemperature[y - 1][x] +
-                            newTemperature[y + 1][x] +
-                            newTemperature[y][x - 1] +
-                            newTemperature[y][x + 1]) /
-                        4;
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const north = sampleTemperature(newTemperature, x, y - 1);
+                    const south = sampleTemperature(newTemperature, x, y + 1);
+                    const west = sampleTemperature(newTemperature, x - 1, y);
+                    const east = sampleTemperature(newTemperature, x + 1, y);
+                    const avgNeighborTemp = (north + south + west + east) / 4;
                     diffusedTemp[y][x] += (avgNeighborTemp - newTemperature[y][x]) * DIFFUSION_RATE;
                 }
             }
