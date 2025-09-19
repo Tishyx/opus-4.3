@@ -133,8 +133,8 @@ canvas {
     display: flex;
     flex-direction: column;
     gap: 24px;
-    overflow: hidden;
-    max-height: calc(100vh - 120px);
+    overflow: visible;
+    max-height: none;
     backdrop-filter: blur(18px);
 }
 
