@@ -8,7 +8,7 @@ import {
   URBAN_PROPERTIES,
   WATER_PROPERTIES,
 } from '../shared/constants';
-import { LAND_TYPES, SOIL_TYPES } from '../shared/types';
+import { LAND_TYPES, type LandType, SOIL_TYPES, type SoilType } from '../shared/types';
 import type { SimulationState } from './state';
 
 export function clamp(value: number, min: number, max: number): number {
@@ -44,12 +44,18 @@ export function getThermalProperties(state: SimulationState, x: number, y: numbe
   return SOIL_PROPERTIES[soilType] ?? SOIL_PROPERTIES[SOIL_TYPES.LOAM];
 }
 
-export function resolveLandType(tileValue: string): number | undefined {
-  return LAND_TYPE_MAP[tileValue];
+export function resolveLandType(tileValue: string): LandType | undefined {
+  if (tileValue in LAND_TYPE_MAP) {
+    return LAND_TYPE_MAP[tileValue as keyof typeof LAND_TYPE_MAP];
+  }
+  return undefined;
 }
 
-export function resolveSoilType(tileValue: string): number | undefined {
-  return SOIL_TYPE_MAP[tileValue];
+export function resolveSoilType(tileValue: string): SoilType | undefined {
+  if (tileValue in SOIL_TYPE_MAP) {
+    return SOIL_TYPE_MAP[tileValue as keyof typeof SOIL_TYPE_MAP];
+  }
+  return undefined;
 }
 
 export function getLandColor(state: SimulationState, x: number, y: number, showSoil: boolean): string {

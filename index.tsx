@@ -33,6 +33,7 @@ import {
 } from './src/ui/controls';
 import { drawSimulation } from './src/ui/rendering';
 import { setupEventListeners, type SimulationEventCallbacks } from './src/ui/events';
+import { CLOUD_TYPES, PRECIP_TYPES } from './src/simulation/weatherTypes';
 
 // ===== GLOBAL STATE =====
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -118,9 +119,9 @@ function runSimulation(simDeltaTimeMinutes: number): void {
         resetGrid(state.cloudOpticalDepth, 0);
         resetGrid(state.cloudBase, 0);
         resetGrid(state.cloudTop, 0);
-        resetGrid(state.cloudType, 0);
+        resetGrid(state.cloudType, CLOUD_TYPES.NONE);
         resetGrid(state.precipitation, 0);
-        resetGrid(state.precipitationType, 0);
+        resetGrid(state.precipitationType, PRECIP_TYPES.NONE);
         resetGrid(state.thermalStrength, 0);
         resetGrid(state.convectiveEnergy, 0);
         resetGrid(state.iceContent, 0);

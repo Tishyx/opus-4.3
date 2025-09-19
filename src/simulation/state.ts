@@ -1,12 +1,14 @@
 import { BASE_ELEVATION, CELL_SIZE, GRID_SIZE } from '../shared/constants';
+import { LAND_TYPES, type LandType, SOIL_TYPES, type SoilType } from '../shared/types';
+import { CLOUD_TYPES, type CloudType, PRECIP_TYPES, type PrecipitationType } from './weatherTypes';
 
 export type VectorFieldCell = { x: number; y: number; speed: number };
 
-type Grid = number[][];
+type Grid<T = number> = T[][];
 
 export type VectorField = VectorFieldCell[][];
 
-function createGrid(initialValue: number): Grid {
+function createGrid<T>(initialValue: T): Grid<T> {
   return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(initialValue));
 }
 
@@ -17,43 +19,43 @@ function createVectorField(): VectorField {
 }
 
 export interface SimulationState {
-  elevation: Grid;
-  landCover: Grid;
-  soilType: Grid;
-  temperature: Grid;
-  hillshade: Grid;
-  waterDistance: Grid;
-  nearestWaterAreaId: Grid;
-  forestDistance: Grid;
-  nearestForestAreaId: Grid;
-  forestDepth: Grid;
-  urbanDistance: Grid;
-  contiguousAreas: Grid;
+  elevation: Grid<number>;
+  landCover: Grid<LandType>;
+  soilType: Grid<SoilType>;
+  temperature: Grid<number>;
+  hillshade: Grid<number>;
+  waterDistance: Grid<number>;
+  nearestWaterAreaId: Grid<number>;
+  forestDistance: Grid<number>;
+  nearestForestAreaId: Grid<number>;
+  forestDepth: Grid<number>;
+  urbanDistance: Grid<number>;
+  contiguousAreas: Grid<number>;
   areasizes: Map<number, number>;
   inversionHeight: number;
   inversionStrength: number;
-  fogDensity: Grid;
-  downSlopeWinds: Grid;
+  fogDensity: Grid<number>;
+  downSlopeWinds: Grid<number>;
   windVectorField: VectorField;
-  foehnEffect: Grid;
-  inversionAndDownslopeRate: Grid;
-  soilMoisture: Grid;
-  soilTemperature: Grid;
-  cloudCoverage: Grid;
-  cloudBase: Grid;
-  cloudTop: Grid;
-  cloudType: Grid;
-  cloudOpticalDepth: Grid;
-  precipitation: Grid;
-  precipitationType: Grid;
-  humidity: Grid;
-  dewPoint: Grid;
-  convectiveEnergy: Grid;
-  thermalStrength: Grid;
-  cloudWater: Grid;
-  iceContent: Grid;
-  latentHeatEffect: Grid;
-  snowDepth: Grid;
+  foehnEffect: Grid<number>;
+  inversionAndDownslopeRate: Grid<number>;
+  soilMoisture: Grid<number>;
+  soilTemperature: Grid<number>;
+  cloudCoverage: Grid<number>;
+  cloudBase: Grid<number>;
+  cloudTop: Grid<number>;
+  cloudType: Grid<CloudType>;
+  cloudOpticalDepth: Grid<number>;
+  precipitation: Grid<number>;
+  precipitationType: Grid<PrecipitationType>;
+  humidity: Grid<number>;
+  dewPoint: Grid<number>;
+  convectiveEnergy: Grid<number>;
+  thermalStrength: Grid<number>;
+  cloudWater: Grid<number>;
+  iceContent: Grid<number>;
+  latentHeatEffect: Grid<number>;
+  snowDepth: Grid<number>;
   currentBrush: string;
   currentBrushCategory: string;
   brushSize: number;
@@ -69,8 +71,8 @@ export interface SimulationState {
 export function createSimulationState(): SimulationState {
   return {
     elevation: createGrid(BASE_ELEVATION),
-    landCover: createGrid(0),
-    soilType: createGrid(0),
+    landCover: createGrid(LAND_TYPES.GRASSLAND),
+    soilType: createGrid(SOIL_TYPES.LOAM),
     temperature: createGrid(20),
     hillshade: createGrid(1),
     waterDistance: createGrid(Number.POSITIVE_INFINITY),
@@ -93,10 +95,10 @@ export function createSimulationState(): SimulationState {
     cloudCoverage: createGrid(0),
     cloudBase: createGrid(0),
     cloudTop: createGrid(0),
-    cloudType: createGrid(0),
+    cloudType: createGrid(CLOUD_TYPES.NONE),
     cloudOpticalDepth: createGrid(0),
     precipitation: createGrid(0),
-    precipitationType: createGrid(0),
+    precipitationType: createGrid(PRECIP_TYPES.NONE),
     humidity: createGrid(0.5),
     dewPoint: createGrid(10),
     convectiveEnergy: createGrid(0),
@@ -118,7 +120,7 @@ export function createSimulationState(): SimulationState {
   };
 }
 
-export function resetGrid(grid: Grid, value: number): void {
+export function resetGrid<T>(grid: Grid<T>, value: T): void {
   for (let y = 0; y < GRID_SIZE; y++) {
     grid[y].fill(value);
   }
