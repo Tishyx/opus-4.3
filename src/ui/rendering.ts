@@ -11,31 +11,41 @@ type ColorStop = {
 
 const HEATMAP_PALETTES: Record<HeatmapPalette, ColorStop[]> = {
     'blue-red': [
-        { value: 0, color: [59, 76, 192] },
-        { value: 0.5, color: [221, 221, 221] },
-        { value: 1, color: [180, 4, 38] },
+        { value: 0, color: [49, 54, 149] },
+        { value: 0.25, color: [69, 117, 180] },
+        { value: 0.5, color: [224, 243, 248] },
+        { value: 0.75, color: [244, 109, 67] },
+        { value: 1, color: [165, 0, 38] },
     ],
     'green-yellow': [
-        { value: 0, color: [0, 68, 27] },
-        { value: 0.5, color: [102, 189, 99] },
-        { value: 1, color: [255, 237, 160] },
+        { value: 0, color: [0, 69, 41] },
+        { value: 0.25, color: [35, 132, 67] },
+        { value: 0.5, color: [120, 198, 121] },
+        { value: 0.75, color: [173, 221, 142] },
+        { value: 1, color: [255, 255, 204] },
     ],
     'purple-orange': [
         { value: 0, color: [63, 0, 125] },
-        { value: 0.5, color: [197, 27, 138] },
-        { value: 1, color: [253, 141, 60] },
+        { value: 0.25, color: [106, 81, 163] },
+        { value: 0.5, color: [208, 209, 230] },
+        { value: 0.75, color: [253, 174, 97] },
+        { value: 1, color: [230, 85, 13] },
     ],
     'teal-magenta': [
-        { value: 0, color: [0, 150, 170] },
-        { value: 0.5, color: [102, 102, 204] },
-        { value: 1, color: [204, 51, 153] },
+        { value: 0, color: [0, 121, 140] },
+        { value: 0.25, color: [44, 162, 180] },
+        { value: 0.5, color: [171, 217, 233] },
+        { value: 0.75, color: [244, 109, 190] },
+        { value: 1, color: [197, 27, 138] },
     ],
 };
 
 const HUMIDITY_PALETTE: ColorStop[] = [
-    { value: 0, color: [254, 243, 199] },
-    { value: 0.5, color: [96, 165, 250] },
-    { value: 1, color: [15, 118, 110] },
+    { value: 0, color: [252, 245, 235] },
+    { value: 0.25, color: [221, 214, 168] },
+    { value: 0.5, color: [165, 219, 247] },
+    { value: 0.75, color: [56, 189, 248] },
+    { value: 1, color: [2, 132, 199] },
 ];
 
 function interpolateColor(stops: ColorStop[], value: number): [number, number, number] {
@@ -58,10 +68,16 @@ function interpolateColor(stops: ColorStop[], value: number): [number, number, n
     return stops[stops.length - 1].color;
 }
 
-function getTemperatureColor(temp: number, palette: HeatmapPalette): string {
-    const minTemp = -10;
-    const maxTemp = 40;
-    const normalized = clamp((temp - minTemp) / (maxTemp - minTemp), 0, 1);
+function getTemperatureColor(
+    temp: number,
+    palette: HeatmapPalette,
+    minTemp: number,
+    maxTemp: number
+): string {
+    const safeMin = Number.isFinite(minTemp) ? minTemp : -10;
+    const safeMax = Number.isFinite(maxTemp) ? maxTemp : 40;
+    const span = safeMax - safeMin;
+    const normalized = span > 1e-6 ? clamp((temp - safeMin) / span, 0, 1) : 0.5;
     const [r, g, b] = interpolateColor(HEATMAP_PALETTES[palette], normalized);
     return `rgba(${r}, ${g}, ${b}, 1)`;
 }
@@ -94,11 +110,27 @@ export function drawSimulation(
 
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
+    let minTemperature = Number.POSITIVE_INFINITY;
+    let maxTemperature = Number.NEGATIVE_INFINITY;
+
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
+            const temperature = state.temperature[y][x];
+            if (temperature < minTemperature) minTemperature = temperature;
+            if (temperature > maxTemperature) maxTemperature = temperature;
+
             ctx.fillStyle = getLandColor(state, x, y, showSoil);
             ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
         }
+    }
+
+    if (!Number.isFinite(minTemperature) || !Number.isFinite(maxTemperature)) {
+        minTemperature = -10;
+        maxTemperature = 40;
+    } else if (minTemperature === maxTemperature) {
+        const adjustment = Math.max(0.5, Math.abs(minTemperature) * 0.05);
+        minTemperature -= adjustment;
+        maxTemperature += adjustment;
     }
 
     if (showHillshade) {
@@ -114,7 +146,12 @@ export function drawSimulation(
     if (showHeatmap) {
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
-                const color = getTemperatureColor(state.temperature[y][x], heatmapPalette);
+                const color = getTemperatureColor(
+                    state.temperature[y][x],
+                    heatmapPalette,
+                    minTemperature,
+                    maxTemperature
+                );
                 ctx.globalAlpha = 0.6;
                 ctx.fillStyle = color;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
