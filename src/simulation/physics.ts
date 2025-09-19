@@ -33,6 +33,28 @@ export type SimulationMetrics = {
     avgSnowDepth: number;
 };
 
+const MAX_SOLAR_INTENSITY = 2.4;
+const MIN_CLOUD_TRANSMISSION = 0.2;
+const INVERSION_WIND_THRESHOLD = 15;
+const INVERSION_BASE_OFFSET = 60;
+const INVERSION_DEPTH_SCALE = 180;
+const INVERSION_TERRAIN_RELIEF_SCALE = 120;
+const MAX_INVERSION_THICKNESS = 280;
+const INVERSION_COOLING_MULTIPLIER = -3.2;
+const WARM_BELT_MULTIPLIER = 2.4;
+const WARM_BELT_DECAY = 50;
+const DOWNSLOPE_RATE_MIN = -4;
+const DOWNSLOPE_RATE_MAX = 9;
+const WIND_MIXING_MAX = 0.35;
+const WIND_MIXING_DIVISOR = 55;
+const HUMIDITY_THERMAL_SENSITIVITY = 0.4;
+const HUMIDITY_LATENT_COEFFICIENT = 1.6;
+const BASE_TURBULENCE_RATE = 0.055;
+const NIGHT_COOLING_BASE = 1.1;
+const MAX_HOURLY_TEMP_CHANGE = 7;
+const ABSOLUTE_MIN_TEMP = -70;
+const ABSOLUTE_MAX_TEMP = 65;
+
 export function calculateInversionLayer(
     state: SimulationState,
     hour: number,
@@ -41,7 +63,7 @@ export function calculateInversionLayer(
 ): void {
     const isNightTime = hour <= 6 || hour >= 19;
 
-    if (!isNightTime || windSpeed > 15 || cloudCover > 0.5) {
+    if (!isNightTime || windSpeed > INVERSION_WIND_THRESHOLD || cloudCover > 0.5) {
         state.inversionHeight = 0;
         state.inversionStrength = 0;
         return;
@@ -68,13 +90,17 @@ export function calculateInversionLayer(
     const valleyAvgElev = valleyCount > 0 ? valleyElevSum / valleyCount : BASE_ELEVATION;
     const terrainRelief = maxElev - minElev;
 
-    const windFactor = Math.max(0, 1 - windSpeed / 15);
+    const windFactor = Math.max(0, 1 - windSpeed / INVERSION_WIND_THRESHOLD);
     const hourFactor = hour <= 6 ? (6 - hour) / 6 : (hour - 19) / 5;
 
-    state.inversionHeight = valleyAvgElev + 50 + 200 * windFactor * hourFactor;
-    state.inversionStrength = windFactor * hourFactor * Math.min(1, terrainRelief / 100);
+    state.inversionHeight =
+        valleyAvgElev +
+        INVERSION_BASE_OFFSET +
+        INVERSION_DEPTH_SCALE * windFactor * hourFactor;
+    state.inversionStrength =
+        windFactor * hourFactor * Math.min(1, terrainRelief / INVERSION_TERRAIN_RELIEF_SCALE);
 
-    state.inversionHeight = Math.min(state.inversionHeight, valleyAvgElev + 300);
+    state.inversionHeight = Math.min(state.inversionHeight, valleyAvgElev + MAX_INVERSION_THICKNESS);
 
     if (windSpeed > 10 || terrainRelief < 30) {
         state.inversionStrength *= 0.5;
@@ -114,18 +140,20 @@ export function calculateSolarInsolation(
     const slope = Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy));
     const aspect = Math.atan2(-dzdy, dzdx);
 
+    const sinAltitude = Math.sin(sunAltitude);
+    const cosAltitude = Math.cos(sunAltitude);
     const solarIntensity = Math.max(
         0,
-        Math.cos(slope) * sunAltitude + Math.sin(slope) * sunAltitude * Math.cos(aspect - Math.PI)
+        sinAltitude * Math.cos(slope) + cosAltitude * Math.sin(slope) * Math.cos(aspect - Math.PI)
     );
 
     let cloudReduction = 1;
     if (state.cloudCoverage && state.cloudCoverage[y] && state.cloudCoverage[y][x] > 0) {
         const cloudRadiation = calculateCloudRadiation(state, x, y, sunAltitude);
-        cloudReduction = cloudRadiation.solarTransmission;
+        cloudReduction = Math.max(MIN_CLOUD_TRANSMISSION, cloudRadiation.solarTransmission);
     }
 
-    return Math.min(3, solarIntensity * SOLAR_INTENSITY_FACTOR * cloudReduction);
+    return Math.min(MAX_SOLAR_INTENSITY, solarIntensity * SOLAR_INTENSITY_FACTOR * cloudReduction);
 }
 
 function calculatePhysicsRates(
@@ -146,11 +174,14 @@ function calculatePhysicsRates(
                 if (elev < state.inversionHeight) {
                     const depthBelowInversion = state.inversionHeight - elev;
                     const relativeDepth = depthBelowInversion / (state.inversionHeight - BASE_ELEVATION + 50);
-                    const coolingEffectRate = -state.inversionStrength * relativeDepth * 4;
+                    const coolingEffectRate =
+                        state.inversionStrength * relativeDepth * INVERSION_COOLING_MULTIPLIER;
                     state.inversionAndDownslopeRate[y][x] += coolingEffectRate;
                 } else if (elev < state.inversionHeight + 100) {
                     const heightAboveInversion = elev - state.inversionHeight;
-                    const warmBeltEffectRate = state.inversionStrength * Math.exp(-heightAboveInversion / 40) * 3;
+                    const warmBeltEffectRate =
+                        state.inversionStrength * Math.exp(-heightAboveInversion / WARM_BELT_DECAY) *
+                        WARM_BELT_MULTIPLIER;
 
                     if (isInBounds(x - 1, y - 1) && isInBounds(x + 1, y + 1)) {
                         const avgSurrounding =
@@ -183,11 +214,15 @@ function calculatePhysicsRates(
                     totalEffectRate += state.foehnEffect[y][x];
                 }
 
-                state.inversionAndDownslopeRate[y][x] += clamp(totalEffectRate, -5, 12);
+                state.inversionAndDownslopeRate[y][x] += clamp(
+                    totalEffectRate,
+                    DOWNSLOPE_RATE_MIN,
+                    DOWNSLOPE_RATE_MAX
+                );
 
                 const localWindSpeed = state.windVectorField[y][x].speed;
                 if (localWindSpeed > 5) {
-                    const mixing = Math.min(0.3, localWindSpeed / 50);
+                    const mixing = Math.min(WIND_MIXING_MAX, localWindSpeed / WIND_MIXING_DIVISOR);
                     const baseTemp = calculateBaseTemperature(month, hour);
                     const mixingRate = (baseTemp - state.temperature[y][x]) * mixing;
                     state.inversionAndDownslopeRate[y][x] += mixingRate;
@@ -226,7 +261,7 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
 
                 if (sunAltitude <= 0) {
                     const cloudFactor = 1 - (state.cloudCoverage[y][x] || 0) * 0.75;
-                    const coolingRate = 1.2 * cloudFactor;
+                    const coolingRate = NIGHT_COOLING_BASE * cloudFactor;
                     const soilCooling = coolingRate * (1 - snowEffects.insulationEffect);
                     soilEnergyBalance -= soilCooling / thermalProps.heatCapacity;
                     airEnergyBalance -= coolingRate * 0.2;
@@ -265,12 +300,32 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
                     airEnergyBalance += state.latentHeatEffect[y][x] / timeFactor;
                 }
 
-                const stdTempAtElev = 15 - ((state.elevation[y][x] - BASE_ELEVATION) / 100) * LAPSE_RATE;
-                airEnergyBalance += (stdTempAtElev - prevAirTemp) * 0.05;
+                const humidity = clamp(state.humidity[y][x], 0, 1);
+                const dewPoint = state.dewPoint[y][x];
+                const humidityOffset = (humidity - 0.5) * HUMIDITY_THERMAL_SENSITIVITY;
+                airEnergyBalance -= humidityOffset;
 
-                const MAX_HOURLY_CHANGE = 10;
-                airEnergyBalance = clamp(airEnergyBalance, -MAX_HOURLY_CHANGE, MAX_HOURLY_CHANGE);
-                soilEnergyBalance = clamp(soilEnergyBalance, -MAX_HOURLY_CHANGE, MAX_HOURLY_CHANGE);
+                if (humidity > 0.85 && prevAirTemp > dewPoint) {
+                    const latentCooling = (humidity - 0.85) * HUMIDITY_LATENT_COEFFICIENT;
+                    airEnergyBalance -= latentCooling;
+                } else if (humidity < 0.3 && sunAltitude > 0) {
+                    const dryHeating = (0.3 - humidity) * HUMIDITY_LATENT_COEFFICIENT * 0.35;
+                    airEnergyBalance += dryHeating;
+                }
+
+                const stdTempAtElev = 15 - ((state.elevation[y][x] - BASE_ELEVATION) / 100) * LAPSE_RATE;
+                airEnergyBalance += (stdTempAtElev - prevAirTemp) * BASE_TURBULENCE_RATE;
+
+                airEnergyBalance = clamp(
+                    airEnergyBalance,
+                    -MAX_HOURLY_TEMP_CHANGE,
+                    MAX_HOURLY_TEMP_CHANGE
+                );
+                soilEnergyBalance = clamp(
+                    soilEnergyBalance,
+                    -MAX_HOURLY_TEMP_CHANGE,
+                    MAX_HOURLY_TEMP_CHANGE
+                );
 
                 newTemperature[y][x] += airEnergyBalance * timeFactor;
                 newSoilTemperature[y][x] += soilEnergyBalance * timeFactor;
@@ -301,9 +356,6 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
             newTemperature = diffusedTemp;
         }
     }
-
-    const ABSOLUTE_MIN_TEMP = -80;
-    const ABSOLUTE_MAX_TEMP = 80;
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
