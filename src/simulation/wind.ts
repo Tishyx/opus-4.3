@@ -5,28 +5,65 @@ import { clamp, computeBoundaryDamping, isInBounds } from './utils';
 
 type ExitPoint = { elev: number; x: number; y: number };
 
-const LAND_DRAG_FACTORS: Record<number, number> = {
-  [LAND_TYPES.GRASSLAND]: 0.85,
-  [LAND_TYPES.FOREST]: 0.55,
-  [LAND_TYPES.WATER]: 0.95,
-  [LAND_TYPES.URBAN]: 0.7,
-  [LAND_TYPES.SETTLEMENT]: 0.8,
+const BASE_LAND_DRAG_FACTORS: Record<number, number> = {
+  [LAND_TYPES.GRASSLAND]: 0.78,
+  [LAND_TYPES.FOREST]: 0.48,
+  [LAND_TYPES.WATER]: 0.96,
+  [LAND_TYPES.URBAN]: 0.62,
+  [LAND_TYPES.SETTLEMENT]: 0.7,
 };
+
+const DEFAULT_LAND_DRAG = 0.78;
+const MIN_LAND_DRAG = 0.25;
+const MAX_LAND_DRAG = 0.98;
+
+const FOREST_MAX_DEPTH_METERS = 30;
+const FOREST_DENSITY_MAX_REDUCTION = 0.55;
+
+const SNOW_SMOOTHING_DEPTH = 60;
+const SNOW_MAX_DRAG_REDUCTION = 0.4;
+const SNOW_MIN_FACTOR = 0.6;
+
+const COASTAL_INFLUENCE_DISTANCE = 12;
+const COASTAL_BLEND_STRENGTH = 0.5;
+
+const KATABATIC_SLOPE_SCALE = 0.5;
+const KATABATIC_WIND_SUPPRESSION_SPEED = 30;
+
+const FOEHN_DESCENT_NORMALISER = 120;
+const FOEHN_WIND_NORMALISER = 35;
 
 export function createVegetationDragGetter(
   state: SimulationState
 ): (x: number, y: number) => number {
   return (x: number, y: number): number => {
     const landType = state.landCover[y][x];
-    let drag = LAND_DRAG_FACTORS[landType] ?? 0.85;
+    let drag = BASE_LAND_DRAG_FACTORS[landType] ?? DEFAULT_LAND_DRAG;
 
     if (landType === LAND_TYPES.FOREST) {
       const depth = state.forestDepth[y][x] || 0;
-      const depthFactor = 1 - Math.min(1, depth / 20) * 0.4;
-      drag *= Math.max(0.2, depthFactor);
+      const normalizedDepth = Math.min(1, depth / FOREST_MAX_DEPTH_METERS);
+      const densityReduction = normalizedDepth * FOREST_DENSITY_MAX_REDUCTION;
+      const depthFactor = 1 - densityReduction;
+      drag *= clamp(depthFactor, 0.35, 1);
     }
 
-    return drag;
+    const snowDepth = state.snowDepth[y][x] || 0;
+    if (snowDepth > 0) {
+      const snowFactor =
+        1 - Math.min(1, snowDepth / SNOW_SMOOTHING_DEPTH) * SNOW_MAX_DRAG_REDUCTION;
+      drag *= clamp(snowFactor, SNOW_MIN_FACTOR, 1);
+    }
+
+    const distanceToWater = state.waterDistance[y][x];
+    if (Number.isFinite(distanceToWater) && distanceToWater <= COASTAL_INFLUENCE_DISTANCE) {
+      const influence = 1 - distanceToWater / COASTAL_INFLUENCE_DISTANCE;
+      const blendStrength = influence * COASTAL_BLEND_STRENGTH;
+      const waterDrag = BASE_LAND_DRAG_FACTORS[LAND_TYPES.WATER];
+      drag = drag * (1 - blendStrength) + waterDrag * blendStrength;
+    }
+
+    return clamp(drag, MIN_LAND_DRAG, MAX_LAND_DRAG);
   };
 }
 
@@ -123,7 +160,9 @@ export function calculateDownslopeWinds(
       const slopeAngle = Math.atan(slope);
 
       if (isNightTime && slopeAngle > 0.1) {
-        const katabaticStrength = Math.min(1, slopeAngle / 0.5) * (1 - baseWindSpeed / 30);
+        const katabaticStrength =
+          Math.min(1, slopeAngle / KATABATIC_SLOPE_SCALE) *
+          Math.max(0, 1 - baseWindSpeed / KATABATIC_WIND_SUPPRESSION_SPEED);
 
         let isSurfaceSlope = true;
         for (let d = 1; d <= 2; d++) {
@@ -172,7 +211,9 @@ export function calculateDownslopeWinds(
         if (isLeeSide) {
           const descentHeight = maxUpwindHeight - state.elevation[y][x];
           const adiabaticWarming = descentHeight * 0.01;
-          const foehnStrength = Math.min(1, descentHeight / 100) * (baseWindSpeed / 30);
+          const foehnStrength =
+            Math.min(1, descentHeight / FOEHN_DESCENT_NORMALISER) *
+            Math.min(1, baseWindSpeed / FOEHN_WIND_NORMALISER);
           state.foehnEffect[y][x] = Math.min(12, adiabaticWarming * foehnStrength);
 
           state.windVectorField[y][x].x += windX * foehnStrength * 10 * vegetationDrag;
