@@ -1,4 +1,4 @@
-import { LAND_TYPES, SOIL_TYPES } from './types';
+import { LAND_TYPES, type LandType, SOIL_TYPES, type SoilType } from './types';
 
 export const GRID_SIZE = 200;
 export const CELL_SIZE = 6;
@@ -24,20 +24,20 @@ export const MONTHLY_TEMPS = [-6, -4, 1, 8, 14, 18, 20, 19, 14, 8, 2, -3];
 export const MONTHLY_DAYLIGHT_HOURS = [8.6, 9.7, 11.7, 13.8, 15.2, 16.0, 15.4, 13.8, 11.9, 10.3, 8.9, 8.2];
 export const MONTHLY_DIURNAL_VARIATION = [4.0, 4.5, 6.0, 7.5, 9.0, 10.0, 9.2, 7.8, 6.2, 5.0, 4.3, 3.8];
 
-export const LAND_TYPE_MAP: Record<string, number> = {
+export const LAND_TYPE_MAP = {
   grassland: LAND_TYPES.GRASSLAND,
   forest: LAND_TYPES.FOREST,
   water: LAND_TYPES.WATER,
   urban: LAND_TYPES.URBAN,
   settlement: LAND_TYPES.SETTLEMENT,
-};
+} as const satisfies Record<string, LandType>;
 
-export const SOIL_TYPE_MAP: Record<string, number> = {
+export const SOIL_TYPE_MAP = {
   loam: SOIL_TYPES.LOAM,
   sand: SOIL_TYPES.SAND,
   clay: SOIL_TYPES.CLAY,
   rock: SOIL_TYPES.ROCK,
-};
+} as const satisfies Record<string, SoilType>;
 
 export const WATER_PROPERTIES = {
   name: 'Water',

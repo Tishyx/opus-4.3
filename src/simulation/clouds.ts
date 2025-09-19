@@ -1,13 +1,13 @@
 import { CELL_SIZE, GRID_SIZE } from '../shared/constants';
 import { LAND_TYPES, SOIL_TYPES } from '../shared/types';
 import type { SimulationState } from './state';
-import { CLOUD_TYPES, PRECIP_TYPES } from './weatherTypes';
+import { CLOUD_TYPES, type CloudType, PRECIP_TYPES, type PrecipitationType } from './weatherTypes';
 import { clamp, getThermalProperties, isInBounds } from './utils';
 import { calculateBaseTemperature } from './temperature';
 
 type ConvectiveClouds = {
   development: number;
-  type: number;
+  type: CloudType;
   cape: number;
   thermalStrength: number;
 };
@@ -21,7 +21,7 @@ type CloudMicrophysics = {
 
 type PrecipitationResult = {
   rate: number;
-  type: number;
+  type: PrecipitationType;
 };
 
 type CloudRadiation = {
@@ -121,7 +121,7 @@ function calculatePrecipitation(
   const localCloudType = state.cloudType[y][x];
 
   let precipRate = 0;
-  let precipType = PRECIP_TYPES.NONE;
+  let precipType: PrecipitationType = PRECIP_TYPES.NONE;
 
   if (localCloudType === CLOUD_TYPES.CUMULONIMBUS) {
     precipRate = localCloudWater * 1.5;
@@ -208,7 +208,7 @@ function calculateConvectiveClouds(
   const cape = Math.max(0, thermal * state.humidity[y][x] * 100);
 
   let cloudDevelopment = 0;
-  let cloudTypeResult = CLOUD_TYPES.NONE;
+  let cloudTypeResult: CloudType = CLOUD_TYPES.NONE;
 
   if (cape > 500) {
     cloudDevelopment = Math.min(1, cape / 3000);
