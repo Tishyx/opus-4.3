@@ -8,6 +8,26 @@ import type { SimulationState } from './state';
 import { CLOUD_TYPES, PRECIP_TYPES } from './weatherTypes';
 import { clamp, distance, isInBounds } from './utils';
 
+function clampGridIndex(value: number): number {
+  return Math.max(0, Math.min(GRID_SIZE - 1, value));
+}
+
+function fractionToGridStart(fraction: number): number {
+  return clampGridIndex(Math.floor(fraction * GRID_SIZE));
+}
+
+function fractionToGridEndExclusive(fraction: number): number {
+  return Math.min(GRID_SIZE, Math.ceil(fraction * GRID_SIZE));
+}
+
+function fractionToGridIndex(fraction: number): number {
+  return clampGridIndex(Math.round((GRID_SIZE - 1) * fraction));
+}
+
+function scaleByGrid(fraction: number, minimum = 1): number {
+  return Math.max(minimum, Math.round(GRID_SIZE * fraction));
+}
+
 function generatePerlinNoise(): number[][] {
   const noise: number[][] = [];
   for (let y = 0; y < GRID_SIZE; y++) {
@@ -29,10 +49,18 @@ function generatePerlinNoise(): number[][] {
 }
 
 function addInitialFeatures(state: SimulationState): void {
-  for (let x = 10; x < 90; x++) {
-    for (let y = 40; y <= 50; y++) {
-      const ridgeHeight = 800 + Math.sin(x / 10) * 200;
-      const distFromRidge = Math.abs(y - 45);
+  const ridgeXStart = fractionToGridStart(0.1);
+  const ridgeXEnd = fractionToGridEndExclusive(0.9);
+  const ridgeYStart = fractionToGridStart(0.4);
+  const ridgeYEnd = fractionToGridIndex(0.5);
+  const ridgeCenterY = (ridgeYStart + ridgeYEnd) / 2;
+  const ridgeSpan = Math.max(1, ridgeXEnd - ridgeXStart);
+
+  for (let x = ridgeXStart; x < ridgeXEnd; x++) {
+    const normalizedX = (x - ridgeXStart) / ridgeSpan;
+    const ridgeHeight = 800 + Math.sin(normalizedX * 8 + 1) * 200;
+    for (let y = ridgeYStart; y <= ridgeYEnd; y++) {
+      const distFromRidge = Math.abs(y - ridgeCenterY);
       state.elevation[y][x] = ridgeHeight - distFromRidge * 80;
       if (state.elevation[y][x] > 800) {
         state.soilType[y][x] = SOIL_TYPES.ROCK;
@@ -40,12 +68,18 @@ function addInitialFeatures(state: SimulationState): void {
     }
   }
 
-  for (let y = 10; y < 30; y++) {
-    for (let x = 10; x < 90; x++) {
-      const distFromCenter = Math.abs(y - 20);
+  const valleyYStart = fractionToGridStart(0.1);
+  const valleyYEnd = fractionToGridEndExclusive(0.3);
+  const valleyCenterY = (valleyYStart + valleyYEnd - 1) / 2;
+  const valleyHalfDepth = Math.max(1, valleyCenterY - valleyYStart);
+
+  for (let y = valleyYStart; y < valleyYEnd; y++) {
+    const distFromCenter = Math.abs(y - valleyCenterY);
+    const depthFactor = Math.max(0, valleyHalfDepth - distFromCenter);
+    for (let x = ridgeXStart; x < ridgeXEnd; x++) {
       state.elevation[y][x] = Math.max(
         60,
-        state.elevation[y][x] - (10 - distFromCenter) * 5,
+        state.elevation[y][x] - depthFactor * 5,
       );
       if (state.elevation[y][x] < 80) {
         state.soilType[y][x] = SOIL_TYPES.CLAY;
@@ -53,25 +87,40 @@ function addInitialFeatures(state: SimulationState): void {
     }
   }
 
-  for (let y = 51; y < 70; y++) {
-    for (let x = 10; x < 90; x++) {
-      const ridgeHeight = 800 + Math.sin(x / 10) * 200;
+  const foothillYStart = fractionToGridStart(0.51);
+  const foothillYEnd = fractionToGridEndExclusive(0.7);
+  const ridgeReferenceY = fractionToGridIndex(0.5);
+
+  for (let y = foothillYStart; y < foothillYEnd; y++) {
+    const distanceFromRidge = y - ridgeReferenceY;
+    for (let x = ridgeXStart; x < ridgeXEnd; x++) {
+      const normalizedX = (x - ridgeXStart) / ridgeSpan;
+      const ridgeHeight = 800 + Math.sin(normalizedX * 8 + 1) * 200;
       const mountainBaseHeight = ridgeHeight - 5 * 80;
-      state.elevation[y][x] = Math.max(80, mountainBaseHeight - (y - 50) * 12);
+      state.elevation[y][x] = Math.max(
+        80,
+        mountainBaseHeight - distanceFromRidge * 12,
+      );
     }
   }
 
-  for (let y = 65; y < 80; y++) {
-    for (let x = 30; x < 60; x++) {
+  const duneYStart = fractionToGridStart(0.65);
+  const duneYEnd = fractionToGridEndExclusive(0.8);
+  const duneXStart = fractionToGridStart(0.3);
+  const duneXEnd = fractionToGridEndExclusive(0.6);
+
+  for (let y = duneYStart; y < duneYEnd; y++) {
+    for (let x = duneXStart; x < duneXEnd; x++) {
       if (Math.random() > 0.3) {
         state.soilType[y][x] = SOIL_TYPES.SAND;
       }
     }
   }
 
-  const lakeX = 27;
-  const lakeY = 20;
-  const lakeRadius = 6;
+  const lakeX = fractionToGridIndex(0.27);
+  const lakeY = fractionToGridIndex(0.2);
+  const lakeRadius = scaleByGrid(0.06, 3);
+
   for (let y = lakeY - lakeRadius; y <= lakeY + lakeRadius; y++) {
     for (let x = lakeX - lakeRadius; x <= lakeX + lakeRadius; x++) {
       if (isInBounds(x, y) && distance(x, y, lakeX, lakeY) < lakeRadius) {
@@ -81,8 +130,13 @@ function addInitialFeatures(state: SimulationState): void {
     }
   }
 
-  for (let y = 30; y < 45; y++) {
-    for (let x = 20; x < 80; x++) {
+  const forestYStart = fractionToGridStart(0.3);
+  const forestYEnd = fractionToGridEndExclusive(0.45);
+  const forestXStart = fractionToGridStart(0.2);
+  const forestXEnd = fractionToGridEndExclusive(0.8);
+
+  for (let y = forestYStart; y < forestYEnd; y++) {
+    for (let x = forestXStart; x < forestXEnd; x++) {
       if (isInBounds(x, y) && Math.random() > 0.3) {
         state.landCover[y][x] = LAND_TYPES.FOREST;
         state.soilType[y][x] = SOIL_TYPES.LOAM;
@@ -90,9 +144,10 @@ function addInitialFeatures(state: SimulationState): void {
     }
   }
 
-  const urbanX = 50;
-  const urbanY = 55;
-  const urbanRadius = 40;
+  const urbanX = fractionToGridIndex(0.5);
+  const urbanY = fractionToGridIndex(0.55);
+  const urbanRadius = scaleByGrid(0.4, 12);
+
   for (let y = urbanY - urbanRadius; y <= urbanY + urbanRadius; y++) {
     for (let x = urbanX - urbanRadius; x <= urbanRadius + urbanX; x++) {
       if (
