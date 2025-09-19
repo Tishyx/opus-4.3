@@ -32,6 +32,12 @@ const HEATMAP_PALETTES: Record<HeatmapPalette, ColorStop[]> = {
     ],
 };
 
+const HUMIDITY_PALETTE: ColorStop[] = [
+    { value: 0, color: [254, 243, 199] },
+    { value: 0.5, color: [96, 165, 250] },
+    { value: 1, color: [15, 118, 110] },
+];
+
 function interpolateColor(stops: ColorStop[], value: number): [number, number, number] {
     if (value <= stops[0].value) return stops[0].color;
     if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
@@ -60,6 +66,12 @@ function getTemperatureColor(temp: number, palette: HeatmapPalette): string {
     return `rgba(${r}, ${g}, ${b}, 1)`;
 }
 
+function getHumidityColor(relativeHumidity: number): string {
+    const normalized = clamp(relativeHumidity, 0, 1);
+    const [r, g, b] = interpolateColor(HUMIDITY_PALETTE, normalized);
+    return `rgba(${r}, ${g}, ${b}, 1)`;
+}
+
 export function drawSimulation(
     ctx: CanvasRenderingContext2D | null,
     state: SimulationState,
@@ -76,6 +88,7 @@ export function drawSimulation(
         showPrecipitation,
         showWind,
         showSnow,
+        showHumidity,
         heatmapPalette,
     } = toggles;
 
@@ -103,6 +116,18 @@ export function drawSimulation(
             for (let x = 0; x < GRID_SIZE; x++) {
                 const color = getTemperatureColor(state.temperature[y][x], heatmapPalette);
                 ctx.globalAlpha = 0.6;
+                ctx.fillStyle = color;
+                ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    if (showHumidity) {
+        ctx.globalAlpha = 0.45;
+        for (let y = 0; y < GRID_SIZE; y++) {
+            for (let x = 0; x < GRID_SIZE; x++) {
+                const color = getHumidityColor(state.humidity[y][x]);
                 ctx.fillStyle = color;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }

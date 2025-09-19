@@ -24,6 +24,7 @@ export type VisualizationToggles = {
     showPrecipitation: boolean;
     showWind: boolean;
     showSnow: boolean;
+    showHumidity: boolean;
     heatmapPalette: HeatmapPalette;
 };
 
@@ -59,6 +60,7 @@ export function readVisualizationToggles(): VisualizationToggles {
         showPrecipitation: getElement<HTMLInputElement>('showPrecipitation').checked,
         showWind: getElement<HTMLInputElement>('showWindFlow').checked,
         showSnow: getElement<HTMLInputElement>('showSnowCover').checked,
+        showHumidity: getElement<HTMLInputElement>('showHumidity').checked,
         heatmapPalette: getElement<HTMLSelectElement>('heatmapPalette').value as HeatmapPalette,
     };
 }
