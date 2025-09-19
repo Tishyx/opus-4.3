@@ -2,14 +2,62 @@ import { CELL_SIZE, GRID_SIZE } from '../shared/constants';
 import { PRECIP_TYPES } from '../simulation/weatherTypes';
 import { clamp, getLandColor } from '../simulation/utils';
 import type { SimulationState } from '../simulation/state';
-import type { VisualizationToggles } from './controls';
+import type { HeatmapPalette, VisualizationToggles } from './controls';
 
-function getTemperatureColor(temp: number): string {
+type ColorStop = {
+    value: number;
+    color: [number, number, number];
+};
+
+const HEATMAP_PALETTES: Record<HeatmapPalette, ColorStop[]> = {
+    'blue-red': [
+        { value: 0, color: [59, 76, 192] },
+        { value: 0.5, color: [221, 221, 221] },
+        { value: 1, color: [180, 4, 38] },
+    ],
+    'green-yellow': [
+        { value: 0, color: [0, 68, 27] },
+        { value: 0.5, color: [102, 189, 99] },
+        { value: 1, color: [255, 237, 160] },
+    ],
+    'purple-orange': [
+        { value: 0, color: [63, 0, 125] },
+        { value: 0.5, color: [197, 27, 138] },
+        { value: 1, color: [253, 141, 60] },
+    ],
+    'teal-magenta': [
+        { value: 0, color: [0, 150, 170] },
+        { value: 0.5, color: [102, 102, 204] },
+        { value: 1, color: [204, 51, 153] },
+    ],
+};
+
+function interpolateColor(stops: ColorStop[], value: number): [number, number, number] {
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    for (let i = 0; i < stops.length - 1; i++) {
+        const current = stops[i];
+        const next = stops[i + 1];
+        if (value >= current.value && value <= next.value) {
+            const range = next.value - current.value;
+            const t = range === 0 ? 0 : (value - current.value) / range;
+            const r = Math.round(current.color[0] + (next.color[0] - current.color[0]) * t);
+            const g = Math.round(current.color[1] + (next.color[1] - current.color[1]) * t);
+            const b = Math.round(current.color[2] + (next.color[2] - current.color[2]) * t);
+            return [r, g, b];
+        }
+    }
+
+    return stops[stops.length - 1].color;
+}
+
+function getTemperatureColor(temp: number, palette: HeatmapPalette): string {
     const minTemp = -10;
     const maxTemp = 40;
     const normalized = clamp((temp - minTemp) / (maxTemp - minTemp), 0, 1);
-    const hue = (1 - normalized) * 240;
-    return `hsl(${hue}, 80%, 50%)`;
+    const [r, g, b] = interpolateColor(HEATMAP_PALETTES[palette], normalized);
+    return `rgba(${r}, ${g}, ${b}, 1)`;
 }
 
 export function drawSimulation(
@@ -28,6 +76,7 @@ export function drawSimulation(
         showPrecipitation,
         showWind,
         showSnow,
+        heatmapPalette,
     } = toggles;
 
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -52,7 +101,7 @@ export function drawSimulation(
     if (showHeatmap) {
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
-                const color = getTemperatureColor(state.temperature[y][x]);
+                const color = getTemperatureColor(state.temperature[y][x], heatmapPalette);
                 ctx.globalAlpha = 0.6;
                 ctx.fillStyle = color;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);

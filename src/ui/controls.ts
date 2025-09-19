@@ -13,6 +13,8 @@ export type SimulationControls = {
     enableClouds: boolean;
 };
 
+export type HeatmapPalette = 'blue-red' | 'green-yellow' | 'purple-orange' | 'teal-magenta';
+
 export type VisualizationToggles = {
     showSoil: boolean;
     showHillshade: boolean;
@@ -22,6 +24,7 @@ export type VisualizationToggles = {
     showPrecipitation: boolean;
     showWind: boolean;
     showSnow: boolean;
+    heatmapPalette: HeatmapPalette;
 };
 
 function getElement<T extends HTMLElement>(id: string): T {
@@ -56,6 +59,7 @@ export function readVisualizationToggles(): VisualizationToggles {
         showPrecipitation: getElement<HTMLInputElement>('showPrecipitation').checked,
         showWind: getElement<HTMLInputElement>('showWindFlow').checked,
         showSnow: getElement<HTMLInputElement>('showSnowCover').checked,
+        heatmapPalette: getElement<HTMLSelectElement>('heatmapPalette').value as HeatmapPalette,
     };
 }
 
