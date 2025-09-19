@@ -148,6 +148,14 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
     document.getElementById('month')?.addEventListener('change', callbacks.runSimulationFrame);
     document.getElementById('windDirection')?.addEventListener('change', callbacks.runSimulationFrame);
 
+    const heatmapPaletteSelect = document.getElementById('heatmapPalette') as HTMLSelectElement | null;
+    const showHeatmapCheckbox = document.getElementById('showHeatmap') as HTMLInputElement | null;
+    const syncHeatmapPaletteState = () => {
+        if (!heatmapPaletteSelect || !showHeatmapCheckbox) return;
+        heatmapPaletteSelect.disabled = !showHeatmapCheckbox.checked;
+    };
+    syncHeatmapPaletteState();
+
     document.getElementById('windSpeed')?.addEventListener('input', event => {
         const value = (event.target as HTMLInputElement).value;
         const label = document.getElementById('windSpeedValue');
@@ -165,6 +173,9 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
     document.querySelectorAll('.controls input[type="checkbox"]').forEach(element => {
         element.addEventListener('change', () => {
             const checkbox = element as HTMLInputElement;
+            if (checkbox.id === 'showHeatmap') {
+                syncHeatmapPaletteState();
+            }
             if (checkbox.id.startsWith('show')) {
                 callbacks.redraw();
             } else {
@@ -172,6 +183,8 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
             }
         });
     });
+
+    document.getElementById('heatmapPalette')?.addEventListener('change', callbacks.redraw);
 
     document.getElementById('brushSize')?.addEventListener('input', event => {
         const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
