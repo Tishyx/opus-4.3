@@ -133,8 +133,8 @@ canvas {
     display: flex;
     flex-direction: column;
     gap: 24px;
-    overflow: hidden;
-    max-height: calc(100vh - 120px);
+    overflow: visible;
+    max-height: none;
     backdrop-filter: blur(18px);
 }
 
@@ -174,12 +174,9 @@ canvas {
     gap: 16px;
     padding: 18px 20px;
     user-select: none;
-    position: sticky;
-    top: 0;
-    z-index: 2;
+    position: relative;
     background: linear-gradient(160deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.82));
     border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-    backdrop-filter: blur(14px);
 }
 
 .control-section summary::-webkit-details-marker {
