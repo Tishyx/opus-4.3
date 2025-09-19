@@ -128,15 +128,22 @@ function calculatePrecipitation(
   } else if (localCloudType === CLOUD_TYPES.CUMULUS) {
     precipRate = localCloudWater * 0.7;
   } else if (localCloudType === CLOUD_TYPES.NIMBOSTRATUS) {
-    precipRate = localCloudWater * 0.9;
+    precipRate = localCloudWater * 0.95;
   } else if (localCloudType === CLOUD_TYPES.OROGRAPHIC) {
     precipRate = localCloudWater * 1.1;
-  } else if (localCloudType === CLOUD_TYPES.ALTOSTRATUS) {
+  } else if (
+    localCloudType === CLOUD_TYPES.ALTOSTRATUS ||
+    localCloudType === CLOUD_TYPES.CIRROSTRATUS
+  ) {
     precipRate = localCloudWater * 0.6;
   } else if (localCloudType === CLOUD_TYPES.CIRRUS) {
     precipRate = localCloudWater * 0.15;
   } else if (localCloudType === CLOUD_TYPES.STRATUS) {
-    precipRate = localCloudWater * 0.5;
+    precipRate = localCloudWater * 0.45;
+  } else if (localCloudType === CLOUD_TYPES.STRATOCUMULUS) {
+    precipRate = localCloudWater * 0.55;
+  } else if (localCloudType === CLOUD_TYPES.ALTOCUMULUS) {
+    precipRate = localCloudWater * 0.65;
   }
 
   const precipEfficiency = state.cloudWater[y][x] > 0.5 ? 0.6 : 0.3;
@@ -153,6 +160,7 @@ function calculatePrecipitation(
   if (precipRate > 0.01) {
     const surfaceTemp = state.temperature[y][x];
     const dewPoint = state.dewPoint[y][x];
+    const updraftStrength = state.thermalStrength[y][x];
     const hasWarmLayer = surfaceTemp > -2 && dewPoint > -4 && state.cloudBase[y][x] > state.elevation[y][x] + 600;
 
     if (surfaceTemp <= -5) {
@@ -169,6 +177,24 @@ function calculatePrecipitation(
       precipType = PRECIP_TYPES.SLEET;
     } else {
       precipType = PRECIP_TYPES.RAIN;
+    }
+
+    if (
+      precipType === PRECIP_TYPES.RAIN &&
+      precipRate < 0.08 &&
+      (localCloudType === CLOUD_TYPES.STRATUS || localCloudType === CLOUD_TYPES.STRATOCUMULUS)
+    ) {
+      precipType = PRECIP_TYPES.DRIZZLE;
+    }
+
+    if (
+      precipType === PRECIP_TYPES.RAIN &&
+      surfaceTemp > 1 &&
+      localCloudType === CLOUD_TYPES.CUMULONIMBUS &&
+      (updraftStrength > 2 || state.convectiveEnergy[y][x] > 1800) &&
+      precipRate > 0.6
+    ) {
+      precipType = PRECIP_TYPES.HAIL;
     }
   } else {
     precipRate = 0;
@@ -210,9 +236,18 @@ function calculateConvectiveClouds(
   let cloudDevelopment = 0;
   let cloudTypeResult: CloudType = CLOUD_TYPES.NONE;
 
-  if (cape > 500) {
-    cloudDevelopment = Math.min(1, cape / 3000);
-    cloudTypeResult = cape > 2000 ? CLOUD_TYPES.CUMULONIMBUS : CLOUD_TYPES.CUMULUS;
+  if (cape > 150) {
+    cloudDevelopment = clamp((cape - 150) / 2500, 0, 1);
+
+    if (cape > 2200) {
+      cloudTypeResult = CLOUD_TYPES.CUMULONIMBUS;
+    } else if (cape > 1200) {
+      cloudTypeResult = CLOUD_TYPES.CUMULUS;
+    } else if (cape > 600) {
+      cloudTypeResult = CLOUD_TYPES.ALTOCUMULUS;
+    } else {
+      cloudTypeResult = CLOUD_TYPES.STRATOCUMULUS;
+    }
   }
 
   return {
@@ -363,8 +398,12 @@ export function updateCloudDynamics(
 
         if (humidity > 0.9 && temperature < 2) {
           state.cloudType[y][x] = CLOUD_TYPES.NIMBOSTRATUS;
-        } else if (temperature < -12 && state.iceContent[y][x] > 0.15) {
+        } else if (temperature < -18 && state.iceContent[y][x] > 0.15) {
           state.cloudType[y][x] = CLOUD_TYPES.CIRRUS;
+        } else if (temperature < -8 && state.iceContent[y][x] > 0.1) {
+          state.cloudType[y][x] = CLOUD_TYPES.CIRROSTRATUS;
+        } else if (convective.thermalStrength > 0.4 && humidity < 0.85) {
+          state.cloudType[y][x] = CLOUD_TYPES.ALTOCUMULUS;
         } else {
           state.cloudType[y][x] = CLOUD_TYPES.ALTOSTRATUS;
         }
@@ -372,10 +411,10 @@ export function updateCloudDynamics(
         state.cloudBase[y][x] = state.elevation[y][x] + 400;
         state.cloudTop[y][x] = state.cloudBase[y][x] + 1200 + layeredStrength * 800;
       } else if (fog > 0.35) {
-        state.cloudType[y][x] = CLOUD_TYPES.STRATUS;
+        state.cloudType[y][x] = humidity > 0.8 ? CLOUD_TYPES.STRATUS : CLOUD_TYPES.STRATOCUMULUS;
         cloudFormationRate = fog * 0.6;
         state.cloudBase[y][x] = state.elevation[y][x];
-        state.cloudTop[y][x] = state.elevation[y][x] + 250;
+        state.cloudTop[y][x] = state.elevation[y][x] + 250 + (humidity > 0.8 ? 0 : 150);
       } else {
         state.cloudType[y][x] = CLOUD_TYPES.NONE;
       }
@@ -399,13 +438,18 @@ export function updateCloudDynamics(
 
       if (
         precipRate > 0 &&
-        state.precipitationType[y][x] === PRECIP_TYPES.RAIN &&
+        (state.precipitationType[y][x] === PRECIP_TYPES.RAIN ||
+          state.precipitationType[y][x] === PRECIP_TYPES.DRIZZLE) &&
         state.temperature[y][x] <= 0
       ) {
         state.precipitationType[y][x] = PRECIP_TYPES.FREEZING_RAIN;
       }
 
-      if (precipRate > 0 && microphysics.graupel > 0.05) {
+      if (
+        precipRate > 0 &&
+        microphysics.graupel > 0.05 &&
+        state.precipitationType[y][x] !== PRECIP_TYPES.HAIL
+      ) {
         state.precipitationType[y][x] = PRECIP_TYPES.GRAUPEL;
       }
 
@@ -417,8 +461,12 @@ export function updateCloudDynamics(
         switch (state.cloudType[y][x]) {
           case CLOUD_TYPES.CIRRUS:
             return 4;
+          case CLOUD_TYPES.CIRROSTRATUS:
+            return 6;
           case CLOUD_TYPES.ALTOSTRATUS:
             return 8;
+          case CLOUD_TYPES.ALTOCUMULUS:
+            return 9;
           case CLOUD_TYPES.CUMULUS:
             return 10;
           case CLOUD_TYPES.CUMULONIMBUS:
@@ -427,6 +475,8 @@ export function updateCloudDynamics(
             return 12;
           case CLOUD_TYPES.NIMBOSTRATUS:
             return 14;
+          case CLOUD_TYPES.STRATOCUMULUS:
+            return 9;
           case CLOUD_TYPES.STRATUS:
             return 9;
           default:

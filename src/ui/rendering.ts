@@ -155,6 +155,10 @@ export function drawSimulation(
                 let precipColor = 'rgba(100, 150, 255, 0.7)';
                 if (pType === PRECIP_TYPES.SNOW) precipColor = 'rgba(220, 220, 255, 0.7)';
                 else if (pType === PRECIP_TYPES.SLEET) precipColor = 'rgba(180, 200, 255, 0.7)';
+                else if (pType === PRECIP_TYPES.DRIZZLE) precipColor = 'rgba(140, 190, 255, 0.6)';
+                else if (pType === PRECIP_TYPES.FREEZING_RAIN) precipColor = 'rgba(160, 210, 255, 0.75)';
+                else if (pType === PRECIP_TYPES.GRAUPEL) precipColor = 'rgba(200, 215, 255, 0.75)';
+                else if (pType === PRECIP_TYPES.HAIL) precipColor = 'rgba(240, 240, 255, 0.85)';
                 ctx.fillStyle = precipColor;
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }
