@@ -1,16 +1,69 @@
 import { CELL_SIZE } from '../shared/constants';
-import { LAND_TYPES } from '../shared/types';
+import { LAND_TYPES, SOIL_TYPES } from '../shared/types';
 import { calculateContiguousAreas, calculateDistanceFields, calculateHillshade } from '../simulation/environment';
 import { initializeSoilMoisture } from '../simulation/soil';
 import type { SimulationState } from '../simulation/state';
 import { clamp, describeSurface, distance, isInBounds, resolveLandType, resolveSoilType } from '../simulation/utils';
 import { initializeControlReadouts, resetPlayButton, updatePlayButton } from './controls';
+import { CLOUD_TYPES, PRECIP_TYPES } from '../simulation/weatherTypes';
 
 export type SimulationEventCallbacks = {
     runSimulationFrame: () => void;
     redraw: () => void;
     initializeGrids: () => void;
 };
+
+function toTitleCase(identifier: string): string {
+    return identifier
+        .toLowerCase()
+        .split('_')
+        .filter(Boolean)
+        .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join(' ');
+}
+
+function createTypeLabels<T extends Record<string, number>>(types: T): Record<number, string> {
+    return Object.fromEntries(
+        Object.entries(types).map(([key, value]) => [value, toTitleCase(key)])
+    );
+}
+
+const LAND_TYPE_LABELS = createTypeLabels(LAND_TYPES);
+const SOIL_TYPE_LABELS = createTypeLabels(SOIL_TYPES);
+const CLOUD_TYPE_LABELS = createTypeLabels(CLOUD_TYPES);
+const PRECIP_TYPE_LABELS = createTypeLabels(PRECIP_TYPES);
+
+function getLabel(map: Record<number, string>, value: number | undefined, fallback: string): string {
+    if (value === undefined) return fallback;
+    return map[value] ?? fallback;
+}
+
+function formatPercentage(value: number, fractionDigits = 0): string {
+    return `${(value * 100).toFixed(fractionDigits)}%`;
+}
+
+function formatWindDirection(xComponent: number, yComponent: number): string | null {
+    const magnitude = Math.hypot(xComponent, yComponent);
+    if (magnitude < 0.01) {
+        return null;
+    }
+
+    const angle = (Math.atan2(yComponent, xComponent) * 180) / Math.PI;
+    const normalized = (angle + 360) % 360;
+    const directions = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
+    const index = Math.round(normalized / 45) % directions.length;
+    return `${directions[index]} (${normalized.toFixed(0)}°)`;
+}
+
+function formatCloudHeights(base: number, top: number): string {
+    if (base <= 0 && top <= 0) {
+        return 'None';
+    }
+    if (top <= base) {
+        return `${base.toFixed(0)} m`;
+    }
+    return `${base.toFixed(0)} - ${top.toFixed(0)} m`;
+}
 
 function showTooltip(
     tooltip: HTMLElement,
@@ -19,25 +72,70 @@ function showTooltip(
     x: number,
     y: number
 ): void {
-    const land = Object.keys(LAND_TYPES).find(
-        key => LAND_TYPES[key as keyof typeof LAND_TYPES] === state.landCover[y][x]
-    );
+    const land = getLabel(LAND_TYPE_LABELS, state.landCover[y]?.[x], 'Unknown');
+    const soil = getLabel(SOIL_TYPE_LABELS, state.soilType[y]?.[x], 'Unknown');
     const surface = describeSurface(state, x, y);
+    const dewPoint = state.dewPoint[y]?.[x];
+    const soilMoisture = state.soilMoisture[y]?.[x];
+    const fogDensity = state.fogDensity[y]?.[x];
+    const cloudCoverage = state.cloudCoverage[y]?.[x];
+    const cloudBase = state.cloudBase[y]?.[x];
+    const cloudTop = state.cloudTop[y]?.[x];
+    const cloudType = getLabel(CLOUD_TYPE_LABELS, state.cloudType[y]?.[x], 'None');
+    const precipitationType = getLabel(
+        PRECIP_TYPE_LABELS,
+        state.precipitationType[y]?.[x],
+        'None'
+    );
+    const precipitation = state.precipitation[y]?.[x];
+    const wind = state.windVectorField[y]?.[x];
+    const windDirection = wind ? formatWindDirection(wind.x, wind.y) : null;
+
+    const lines: string[] = [];
+    lines.push(`<strong>Coords:</strong> ${x}, ${y}`);
+    lines.push(`<strong>Land:</strong> ${land}`);
+    lines.push(`<strong>Surface:</strong> ${surface}`);
+    lines.push(`<strong>Soil:</strong> ${soil}`);
+    lines.push(`<strong>Elevation:</strong> ${state.elevation[y][x].toFixed(0)} m`);
+    lines.push(`<strong>Air Temp:</strong> ${state.temperature[y][x].toFixed(1)}°C`);
+    lines.push(`<strong>Surface Temp:</strong> ${state.soilTemperature[y][x].toFixed(1)}°C`);
+    if (dewPoint !== undefined) {
+        lines.push(`<strong>Dew Point:</strong> ${dewPoint.toFixed(1)}°C`);
+    }
+    lines.push(`<strong>Humidity:</strong> ${formatPercentage(state.humidity[y][x])}`);
+    if (soilMoisture !== undefined) {
+        lines.push(`<strong>Soil Moisture:</strong> ${formatPercentage(soilMoisture)}`);
+    }
+    if (fogDensity !== undefined && fogDensity > 0) {
+        lines.push(`<strong>Fog Density:</strong> ${formatPercentage(fogDensity, 1)}`);
+    }
+    if (wind) {
+        const directionSuffix = windDirection ? ` (${windDirection})` : '';
+        lines.push(`<strong>Wind:</strong> ${wind.speed.toFixed(1)} km/h${directionSuffix}`);
+    }
+    if (cloudCoverage !== undefined) {
+        lines.push(`<strong>Cloud Cover:</strong> ${formatPercentage(cloudCoverage)}`);
+    }
+    if (cloudBase !== undefined && cloudTop !== undefined) {
+        lines.push(`<strong>Cloud Height:</strong> ${formatCloudHeights(cloudBase, cloudTop)}`);
+    }
+    lines.push(`<strong>Cloud Type:</strong> ${cloudType}`);
+    if (state.cloudOpticalDepth[y]?.[x] !== undefined) {
+        lines.push(
+            `<strong>Cloud Optical Depth:</strong> ${state.cloudOpticalDepth[y][x].toFixed(1)}`
+        );
+    }
+    if (precipitation !== undefined) {
+        lines.push(
+            `<strong>Precipitation:</strong> ${precipitation.toFixed(2)} mm/hr (${precipitationType})`
+        );
+    }
+    lines.push(`<strong>Snow:</strong> ${state.snowDepth[y][x].toFixed(1)} cm`);
+
     tooltip.style.display = 'block';
     tooltip.style.left = `${event.clientX + 15}px`;
     tooltip.style.top = `${event.clientY}px`;
-    tooltip.innerHTML = `
-        <strong>Coords:</strong> ${x}, ${y}<br>
-        <strong>Air Temp:</strong> ${state.temperature[y][x].toFixed(1)}°C<br>
-        <strong>Surface Temp:</strong> ${state.soilTemperature[y][x].toFixed(1)}°C<br>
-        <strong>Elevation:</strong> ${state.elevation[y][x].toFixed(0)}m<br>
-        <strong>Land:</strong> ${land ?? 'Unknown'}<br>
-        <strong>Surface:</strong> ${surface}<br>
-        <strong>Humidity:</strong> ${(state.humidity[y][x] * 100).toFixed(0)}%<br>
-        <strong>Cloud:</strong> ${(state.cloudCoverage[y][x] * 100).toFixed(0)}%<br>
-        <strong>Wind:</strong> ${state.windVectorField[y][x].speed.toFixed(1)} km/h<br>
-        <strong>Snow:</strong> ${state.snowDepth[y][x].toFixed(1)}cm
-    `;
+    tooltip.innerHTML = lines.join('<br>');
 }
 
 function hideTooltip(tooltip: HTMLElement): void {
