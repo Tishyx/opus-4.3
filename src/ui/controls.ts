@@ -13,7 +13,9 @@ export type SimulationControls = {
     enableClouds: boolean;
 };
 
-export type HeatmapPalette = 'blue-red' | 'green-yellow' | 'purple-orange' | 'teal-magenta';
+const HEATMAP_PALETTE_OPTIONS = ['blue-red', 'green-yellow', 'purple-orange', 'teal-magenta'] as const;
+
+export type HeatmapPalette = (typeof HEATMAP_PALETTE_OPTIONS)[number];
 
 export type VisualizationToggles = {
     showSoil: boolean;
@@ -36,32 +38,88 @@ function getElement<T extends HTMLElement>(id: string): T {
     return element as T;
 }
 
+function readNumericSelectValue(id: string): number {
+    const select = getElement<HTMLSelectElement>(id);
+    const parsed = Number.parseInt(select.value, 10);
+    if (!Number.isNaN(parsed)) {
+        return parsed;
+    }
+
+    for (const option of Array.from(select.options)) {
+        const fallback = Number.parseInt(option.value, 10);
+        if (!Number.isNaN(fallback)) {
+            select.value = option.value;
+            return fallback;
+        }
+    }
+
+    select.value = select.options.length > 0 ? select.options[0].value : '';
+    return 0;
+}
+
+function readNumericInputValue(id: string): number {
+    const input = getElement<HTMLInputElement>(id);
+    const parsed = Number.parseFloat(input.value);
+    if (!Number.isNaN(parsed)) {
+        return parsed;
+    }
+
+    const fallbacks = [input.defaultValue, input.min, input.max];
+    for (const fallback of fallbacks) {
+        if (!fallback) continue;
+        const fallbackValue = Number.parseFloat(fallback);
+        if (!Number.isNaN(fallbackValue)) {
+            input.value = fallbackValue.toString();
+            return fallbackValue;
+        }
+    }
+
+    input.value = '0';
+    return 0;
+}
+
+function readCheckboxValue(id: string): boolean {
+    return getElement<HTMLInputElement>(id).checked;
+}
+
+function readHeatmapPaletteValue(): HeatmapPalette {
+    const select = getElement<HTMLSelectElement>('heatmapPalette');
+    const { value } = select;
+    if ((HEATMAP_PALETTE_OPTIONS as readonly string[]).includes(value)) {
+        return value as HeatmapPalette;
+    }
+
+    const fallback = HEATMAP_PALETTE_OPTIONS[0];
+    select.value = fallback;
+    return fallback;
+}
+
 export function readSimulationControls(): SimulationControls {
     return {
-        month: Number.parseInt(getElement<HTMLSelectElement>('month').value, 10),
-        windSpeed: Number.parseInt(getElement<HTMLInputElement>('windSpeed').value, 10),
-        windDir: Number.parseInt(getElement<HTMLSelectElement>('windDirection').value, 10),
-        windGustiness: Number.parseInt(getElement<HTMLInputElement>('windGustiness').value, 10),
-        enableAdvection: getElement<HTMLInputElement>('enableAdvection').checked,
-        enableDiffusion: getElement<HTMLInputElement>('enableDiffusion').checked,
-        enableInversions: getElement<HTMLInputElement>('enableInversions').checked,
-        enableDownslope: getElement<HTMLInputElement>('enableDownslope').checked,
-        enableClouds: getElement<HTMLInputElement>('enableClouds').checked,
+        month: readNumericSelectValue('month'),
+        windSpeed: readNumericInputValue('windSpeed'),
+        windDir: readNumericSelectValue('windDirection'),
+        windGustiness: readNumericInputValue('windGustiness'),
+        enableAdvection: readCheckboxValue('enableAdvection'),
+        enableDiffusion: readCheckboxValue('enableDiffusion'),
+        enableInversions: readCheckboxValue('enableInversions'),
+        enableDownslope: readCheckboxValue('enableDownslope'),
+        enableClouds: readCheckboxValue('enableClouds'),
     };
 }
 
 export function readVisualizationToggles(): VisualizationToggles {
     return {
-        showSoil: getElement<HTMLInputElement>('showSoilTypes').checked,
-        showHillshade: getElement<HTMLInputElement>('showHillshade').checked,
-        showHeatmap: getElement<HTMLInputElement>('showHeatmap').checked,
-        showClouds: getElement<HTMLInputElement>('showClouds').checked,
-        showFog: getElement<HTMLInputElement>('showFog').checked,
-        showPrecipitation: getElement<HTMLInputElement>('showPrecipitation').checked,
-        showWind: getElement<HTMLInputElement>('showWindFlow').checked,
-        showSnow: getElement<HTMLInputElement>('showSnowCover').checked,
-        showHumidity: getElement<HTMLInputElement>('showHumidity').checked,
-        heatmapPalette: getElement<HTMLSelectElement>('heatmapPalette').value as HeatmapPalette,
+        showSoil: readCheckboxValue('showSoilTypes'),
+        showHillshade: readCheckboxValue('showHillshade'),
+        showHeatmap: readCheckboxValue('showHeatmap'),
+        showClouds: readCheckboxValue('showClouds'),
+        showFog: readCheckboxValue('showFog'),
+        showPrecipitation: readCheckboxValue('showPrecipitation'),
+        showWind: readCheckboxValue('showWindFlow'),
+        showSnow: readCheckboxValue('showSnowCover'),
+        showHumidity: readCheckboxValue('showHumidity'),
+        heatmapPalette: readHeatmapPaletteValue(),
     };
 }
 
@@ -99,11 +157,11 @@ export function updateSimulationClock(simulationMinutes: number): void {
 }
 
 export function initializeControlReadouts(): void {
-    getElement<HTMLElement>('windSpeedValue').textContent = getElement<HTMLInputElement>('windSpeed').value;
-    getElement<HTMLElement>('windGustinessValue').textContent = getElement<HTMLInputElement>('windGustiness').value;
-    getElement<HTMLElement>('brushSizeValue').textContent = getElement<HTMLInputElement>('brushSize').value;
-    getElement<HTMLElement>('terrainStrengthValue').textContent = getElement<HTMLInputElement>('terrainStrength').value;
-    getElement<HTMLElement>('speedValue').textContent = `${getElement<HTMLInputElement>('simSpeed').value}x`;
+    getElement<HTMLElement>('windSpeedValue').textContent = readNumericInputValue('windSpeed').toString();
+    getElement<HTMLElement>('windGustinessValue').textContent = readNumericInputValue('windGustiness').toString();
+    getElement<HTMLElement>('brushSizeValue').textContent = readNumericInputValue('brushSize').toString();
+    getElement<HTMLElement>('terrainStrengthValue').textContent = readNumericInputValue('terrainStrength').toString();
+    getElement<HTMLElement>('speedValue').textContent = `${readNumericInputValue('simSpeed')}x`;
 }
 
 function buildPlayButtonMarkup(isSimulating: boolean): string {
