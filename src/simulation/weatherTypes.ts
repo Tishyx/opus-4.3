@@ -6,6 +6,7 @@ export const CLOUD_TYPES = {
   OROGRAPHIC: 4,
   CIRRUS: 5,
   ALTOSTRATUS: 6,
+  NIMBOSTRATUS: 7,
 } as const;
 
 export type CloudType = (typeof CLOUD_TYPES)[keyof typeof CLOUD_TYPES];
