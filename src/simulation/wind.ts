@@ -1,4 +1,5 @@
 import { CELL_SIZE, EPSILON, GRID_SIZE } from '../shared/constants';
+import { LAND_TYPES } from '../shared/types';
 import { resetGrid, resetVectorField, type SimulationState, type VectorField } from './state';
 import { isInBounds } from './utils';
 
@@ -59,6 +60,27 @@ export function calculateDownslopeWinds(
 
   const isNightTime = hour <= 6 || hour >= 19;
   const windDirRad = (windDir * Math.PI) / 180;
+
+  const landDragFactors: Record<number, number> = {
+    [LAND_TYPES.GRASSLAND]: 0.85,
+    [LAND_TYPES.FOREST]: 0.55,
+    [LAND_TYPES.WATER]: 0.95,
+    [LAND_TYPES.URBAN]: 0.7,
+    [LAND_TYPES.SETTLEMENT]: 0.8,
+  };
+
+  const getVegetationDrag = (x: number, y: number): number => {
+    const landType = state.landCover[y][x];
+    let drag = landDragFactors[landType] ?? 0.85;
+
+    if (landType === LAND_TYPES.FOREST) {
+      const depth = state.forestDepth[y][x] || 0;
+      const depthFactor = 1 - Math.min(1, depth / 20) * 0.4;
+      drag *= Math.max(0.2, depthFactor);
+    }
+
+    return drag;
+  };
 
   for (let y = 2; y < GRID_SIZE - 2; y++) {
     for (let x = 2; x < GRID_SIZE - 2; x++) {
@@ -239,11 +261,22 @@ export function calculateDownslopeWinds(
         const gustFactor = (windGustiness / 100) * (1 + roughness + thermalTurbulence);
         const localWindSpeed =
           Math.sqrt(state.windVectorField[y][x].x ** 2 + state.windVectorField[y][x].y ** 2) + baseWindSpeed;
-        const gustMagnitude = localWindSpeed * gustFactor * 0.5;
+        const vegetationDrag = getVegetationDrag(x, y);
+        const gustMagnitude = localWindSpeed * gustFactor * 0.5 * vegetationDrag;
 
         state.windVectorField[y][x].x += (Math.random() - 0.5) * 2 * gustMagnitude;
         state.windVectorField[y][x].y += (Math.random() - 0.5) * 2 * gustMagnitude;
       }
+    }
+  }
+
+  for (let y = 0; y < GRID_SIZE; y++) {
+    for (let x = 0; x < GRID_SIZE; x++) {
+      const vec = state.windVectorField[y][x];
+      const vegetationDrag = getVegetationDrag(x, y);
+      vec.x *= vegetationDrag;
+      vec.y *= vegetationDrag;
+      vec.speed = Math.sqrt(vec.x * vec.x + vec.y * vec.y);
     }
   }
 
