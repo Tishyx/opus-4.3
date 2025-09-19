@@ -203,8 +203,10 @@ function calculateCloudMicrophysics(
 
   if (state.temperature[y][x] < 0 && state.cloudWater[y][x] > 0) {
     const freezingRate = Math.exp(-state.temperature[y][x] / 10);
-    iceContent = state.cloudWater[y][x] * freezingRate;
-    state.cloudWater[y][x] *= 1 - freezingRate * 0.5;
+    const initialCloudWater = state.cloudWater[y][x];
+    iceContent = initialCloudWater * freezingRate;
+    const newCloudWater = initialCloudWater * (1 - freezingRate * 0.5);
+    state.cloudWater[y][x] = Math.max(newCloudWater, 0);
   }
 
   if (state.temperature[y][x] > 0 && state.cloudWater[y][x] > 0.3) {
@@ -339,14 +341,14 @@ export function updateCloudDynamics(
       const cloudWaterChange = (cloudFormationRate - solarDissipationRate - precipWaterLossRate) * timeFactor;
       state.cloudWater[y][x] = clamp(state.cloudWater[y][x] + cloudWaterChange, 0, 1.5);
 
-      state.cloudCoverage[y][x] = Math.min(1, state.cloudWater[y][x]);
-      state.cloudOpticalDepth[y][x] = state.cloudWater[y][x] * 10;
-
       updateHumidity(state, x, y, windSpeed, precipRate, precip.type, timeFactor);
 
       const updraft = state.thermalStrength[y][x] * 2;
       const microphysics = calculateCloudMicrophysics(state, x, y, updraft);
       state.iceContent[y][x] = microphysics.ice;
+
+      state.cloudCoverage[y][x] = Math.min(1, state.cloudWater[y][x]);
+      state.cloudOpticalDepth[y][x] = state.cloudWater[y][x] * 10;
 
       if (precipRate > 0) {
         if (precip.type === PRECIP_TYPES.SNOW) {
