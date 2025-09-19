@@ -97,7 +97,12 @@ function calculateOrographicClouds(
   return 0;
 }
 
-function calculatePrecipitation(state: SimulationState, x: number, y: number): PrecipitationResult {
+function calculatePrecipitation(
+  state: SimulationState,
+  x: number,
+  y: number,
+  timeFactor: number
+): PrecipitationResult {
   const localCloudWater = state.cloudWater[y][x];
   const localCloudType = state.cloudType[y][x];
 
@@ -116,8 +121,9 @@ function calculatePrecipitation(state: SimulationState, x: number, y: number): P
 
   const precipEfficiency = state.cloudWater[y][x] > 0.5 ? 0.6 : 0.3;
   const precipProbability = Math.min(1, state.cloudWater[y][x] * 0.7);
+  const timeAdjustedProbability = 1 - Math.pow(1 - precipProbability, Math.max(timeFactor, 0));
 
-  if (Math.random() < precipProbability) {
+  if (Math.random() < timeAdjustedProbability) {
     const randomFactor = 0.7 + Math.random() * 0.6;
     precipRate = localCloudWater * precipEfficiency * randomFactor;
   }
@@ -324,7 +330,7 @@ export function updateCloudDynamics(
 
       const solarDissipationRate = sunAltitude > 0 ? state.cloudWater[y][x] * sunAltitude * 0.8 : 0;
 
-      const precip = calculatePrecipitation(state, x, y);
+      const precip = calculatePrecipitation(state, x, y, timeFactor);
       const precipRate = precip.rate;
       state.precipitation[y][x] = precipRate;
       state.precipitationType[y][x] = precip.type;
