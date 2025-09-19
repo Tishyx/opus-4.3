@@ -106,8 +106,16 @@ export function initializeControlReadouts(): void {
     getElement<HTMLElement>('speedValue').textContent = `${getElement<HTMLInputElement>('simSpeed').value}x`;
 }
 
+function buildPlayButtonMarkup(isSimulating: boolean): string {
+    const icon = isSimulating
+        ? `<span class="icon icon-pause" aria-hidden="true"><svg viewBox="0 0 24 24" role="presentation" focusable="false"><path fill="currentColor" d="M9 7h2.5v10H9V7Zm5.5 0H17v10h-2.5V7Z"></path></svg></span>`
+        : `<span class="icon icon-play" aria-hidden="true"><svg viewBox="0 0 24 24" role="presentation" focusable="false"><path fill="currentColor" d="M9 7v10l8-5-8-5Z"></path></svg></span>`;
+    const label = isSimulating ? 'Pause' : 'Play';
+    return `${icon}<span class="btn-label">${label}</span>`;
+}
+
 export function updatePlayButton(isSimulating: boolean): void {
-    getElement<HTMLButtonElement>('playPauseBtn').innerHTML = isSimulating ? '⏸️ Pause' : '▶️ Play';
+    getElement<HTMLButtonElement>('playPauseBtn').innerHTML = buildPlayButtonMarkup(isSimulating);
 }
 
 export function resetPlayButton(): void {
