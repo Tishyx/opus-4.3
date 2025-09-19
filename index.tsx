@@ -1,5 +1,9 @@
 import { GRID_SIZE } from './src/shared/constants';
 import {
+    getDaylightHoursFromMonthValue,
+    toMonthValue,
+} from './src/shared/seasonal';
+import {
     createSimulationState,
     resetGrid,
     resetVectorField,
@@ -64,10 +68,19 @@ function runSimulation(simDeltaTimeMinutes: number): void {
 
     updateSimulationClock(state.simulationTime);
 
-    const sunAltitude = Math.max(
-        0,
-        Math.sin(((currentHour + currentMinute / 60) - 6) * Math.PI / 12)
-    );
+    const timeOfDay = currentHour + currentMinute / 60;
+    const monthValue = toMonthValue(month);
+    const daylightHours = getDaylightHoursFromMonthValue(monthValue);
+    const sunriseHour = 12 - daylightHours / 2;
+    const sunsetHour = sunriseHour + daylightHours;
+    let sunAltitude = 0;
+
+    if (daylightHours > 0 && timeOfDay >= sunriseHour && timeOfDay <= sunsetHour) {
+        const dayProgress = (timeOfDay - sunriseHour) / daylightHours;
+        sunAltitude = Math.sin(dayProgress * Math.PI);
+    }
+
+    sunAltitude = Math.max(0, sunAltitude);
     const timeFactor = simDeltaTimeMinutes / 60;
 
     resetGrid(state.latentHeatEffect, 0);
