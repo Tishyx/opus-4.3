@@ -1,8 +1,9 @@
+import { MONTHLY_DIURNAL_VARIATION, MONTHLY_TEMPS } from '../shared/constants';
 import {
-  MONTHLY_DAYLIGHT_HOURS,
-  MONTHLY_DIURNAL_VARIATION,
-  MONTHLY_TEMPS,
-} from '../shared/constants';
+  getDaylightHoursFromMonthValue,
+  sampleMonthlyCycle,
+  toMonthValue,
+} from '../shared/seasonal';
 
 const EVENING_WARMTH_FRACTION = 0.15;
 const PREDAWN_WARMTH_FRACTION = 0.35;
@@ -23,20 +24,6 @@ const normalizeHour = (hour: number) => {
   return wrapped < 0 ? wrapped + 24 : wrapped;
 };
 
-const sampleMonthlyCycle = (monthValue: number, values: number[]) => {
-  if (values.length === 0) {
-    return 0;
-  }
-  const period = values.length;
-  const wrapped = ((monthValue % period) + period) % period;
-  const lowerIndex = Math.floor(wrapped);
-  const upperIndex = (lowerIndex + 1) % period;
-  const fraction = wrapped - lowerIndex;
-  const lowerValue = values[lowerIndex];
-  const upperValue = values[upperIndex];
-  return lowerValue + (upperValue - lowerValue) * fraction;
-};
-
 const smoothstep = (edge0: number, edge1: number, value: number) => {
   if (edge1 === edge0) {
     return 0;
@@ -46,11 +33,11 @@ const smoothstep = (edge0: number, edge1: number, value: number) => {
 };
 
 export function calculateBaseTemperature(month: number, hour: number): number {
-  const monthValue = Number.isFinite(month) ? month - 1 : 0;
+  const monthValue = toMonthValue(month);
   const normalizedHour = normalizeHour(hour);
 
   const averageTemp = sampleMonthlyCycle(monthValue - SEASONAL_LAG_MONTHS, MONTHLY_TEMPS);
-  const daylightHours = clamp(sampleMonthlyCycle(monthValue, MONTHLY_DAYLIGHT_HOURS), 0, 24);
+  const daylightHours = getDaylightHoursFromMonthValue(monthValue);
   const diurnalRange = Math.max(0, sampleMonthlyCycle(monthValue, MONTHLY_DIURNAL_VARIATION));
 
   const sunrise = 12 - daylightHours / 2;
