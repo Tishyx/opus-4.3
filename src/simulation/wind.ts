@@ -5,18 +5,31 @@ import { isInBounds } from './utils';
 
 type ExitPoint = { elev: number; x: number; y: number };
 
-function bilinearInterpolate(grid: number[][], x: number, y: number): number {
-  const x1 = Math.floor(x);
-  const y1 = Math.floor(y);
-  const x2 = Math.ceil(x);
-  const y2 = Math.ceil(y);
-  const xFrac = x - x1;
-  const yFrac = y - y1;
+function clampCoord(value: number): number {
+  if (value < 0) {
+    return 0;
+  }
+  if (value > GRID_SIZE - 1) {
+    return GRID_SIZE - 1;
+  }
+  return value;
+}
 
-  const p11 = isInBounds(x1, y1) ? grid[y1][x1] : 0;
-  const p12 = isInBounds(x1, y2) ? grid[y2][x1] : 0;
-  const p21 = isInBounds(x2, y1) ? grid[y1][x2] : 0;
-  const p22 = isInBounds(x2, y2) ? grid[y2][x2] : 0;
+function bilinearInterpolate(grid: number[][], x: number, y: number): number {
+  const clampedX = clampCoord(x);
+  const clampedY = clampCoord(y);
+
+  const x1 = Math.floor(clampedX);
+  const y1 = Math.floor(clampedY);
+  const x2 = Math.min(x1 + 1, GRID_SIZE - 1);
+  const y2 = Math.min(y1 + 1, GRID_SIZE - 1);
+  const xFrac = clampedX - x1;
+  const yFrac = clampedY - y1;
+
+  const p11 = grid[y1][x1];
+  const p12 = grid[y2][x1];
+  const p21 = grid[y1][x2];
+  const p22 = grid[y2][x2];
 
   const val1 = p11 * (1 - yFrac) + p12 * yFrac;
   const val2 = p21 * (1 - yFrac) + p22 * yFrac;
@@ -37,8 +50,8 @@ export function advectGrid(
   for (let y = 0; y < GRID_SIZE; y++) {
     for (let x = 0; x < GRID_SIZE; x++) {
       const wind = windField[y][x];
-      const sourceX = x - wind.x * dt;
-      const sourceY = y - wind.y * dt;
+      const sourceX = clampCoord(x - wind.x * dt);
+      const sourceY = clampCoord(y - wind.y * dt);
 
       newGrid[y][x] = bilinearInterpolate(grid, sourceX, sourceY);
     }
