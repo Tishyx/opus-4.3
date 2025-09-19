@@ -30,22 +30,36 @@ type CloudRadiation = {
 };
 
 function calculateCloudCoverage(state: SimulationState, x: number, y: number, hour: number): number {
-  let coverage = 0;
+  const humidity = state.humidity[y][x];
+  const fog = state.fogDensity[y][x];
+  const convectiveEnergy = state.convectiveEnergy[y][x];
 
-  if (state.humidity[y][x] > 0.7) {
-    coverage = (state.humidity[y][x] - 0.7) / 0.3;
+  let coverage = clamp((humidity - 0.55) / 0.45, 0, 1);
+
+  if (convectiveEnergy > 0) {
+    coverage += clamp(convectiveEnergy / 4000, 0, 0.35);
   }
 
-  if (hour >= 12 && hour <= 17) {
-    const afternoonFactor = Math.sin(((hour - 12) / 5) * Math.PI);
-    coverage += afternoonFactor * 0.3;
+  if (fog > 0.2) {
+    coverage += fog * 0.5;
   }
 
   if (state.landCover[y][x] === LAND_TYPES.WATER) {
-    coverage += 0.2;
+    coverage += 0.15;
+  } else if (state.landCover[y][x] === LAND_TYPES.FOREST) {
+    coverage += 0.05;
   }
 
-  return Math.min(1, coverage);
+  const diurnalPhase = Math.sin(((hour - 10) / 12) * Math.PI);
+  if (diurnalPhase > 0) {
+    coverage += diurnalPhase * 0.2;
+  }
+
+  if (state.snowDepth[y][x] > 10) {
+    coverage += 0.05;
+  }
+
+  return clamp(coverage, 0, 1);
 }
 
 function calculateOrographicClouds(
@@ -115,6 +129,12 @@ function calculatePrecipitation(
     precipRate = localCloudWater * 0.7;
   } else if (localCloudType === CLOUD_TYPES.NIMBOSTRATUS) {
     precipRate = localCloudWater * 0.9;
+  } else if (localCloudType === CLOUD_TYPES.OROGRAPHIC) {
+    precipRate = localCloudWater * 1.1;
+  } else if (localCloudType === CLOUD_TYPES.ALTOSTRATUS) {
+    precipRate = localCloudWater * 0.6;
+  } else if (localCloudType === CLOUD_TYPES.CIRRUS) {
+    precipRate = localCloudWater * 0.15;
   } else if (localCloudType === CLOUD_TYPES.STRATUS) {
     precipRate = localCloudWater * 0.5;
   }
@@ -131,12 +151,24 @@ function calculatePrecipitation(
   precipRate = Math.min(precipRate, 2);
 
   if (precipRate > 0.01) {
-    if (state.temperature[y][x] > 2) {
-      precipType = PRECIP_TYPES.RAIN;
-    } else if (state.temperature[y][x] <= -5) {
+    const surfaceTemp = state.temperature[y][x];
+    const dewPoint = state.dewPoint[y][x];
+    const hasWarmLayer = surfaceTemp > -2 && dewPoint > -4 && state.cloudBase[y][x] > state.elevation[y][x] + 600;
+
+    if (surfaceTemp <= -5) {
       precipType = PRECIP_TYPES.SNOW;
-    } else {
+    } else if (surfaceTemp <= 0 && hasWarmLayer) {
+      precipType = PRECIP_TYPES.FREEZING_RAIN;
+    } else if (
+      surfaceTemp <= 1 &&
+      (localCloudType === CLOUD_TYPES.CUMULONIMBUS || localCloudType === CLOUD_TYPES.OROGRAPHIC) &&
+      state.iceContent[y][x] > 0.2
+    ) {
+      precipType = PRECIP_TYPES.GRAUPEL;
+    } else if (surfaceTemp <= 1) {
       precipType = PRECIP_TYPES.SLEET;
+    } else {
+      precipType = PRECIP_TYPES.RAIN;
     }
   } else {
     precipRate = 0;
@@ -311,6 +343,10 @@ export function updateCloudDynamics(
       state.thermalStrength[y][x] = convective.thermalStrength;
 
       let cloudFormationRate = 0;
+      const humidity = state.humidity[y][x];
+      const fog = state.fogDensity[y][x];
+      const temperature = state.temperature[y][x];
+
       if (orographicFormationRate > 0.5) {
         state.cloudType[y][x] = CLOUD_TYPES.OROGRAPHIC;
         cloudFormationRate = orographicFormationRate;
@@ -321,11 +357,25 @@ export function updateCloudDynamics(
         cloudFormationRate = convectiveFormationRate;
         state.cloudBase[y][x] = state.elevation[y][x] + 500;
         state.cloudTop[y][x] = state.elevation[y][x] + 500 + convective.cape;
-      } else if (state.fogDensity[y][x] > 0.5) {
+      } else if (humidity > 0.65) {
+        const layeredStrength = (humidity - 0.65) * (1 + state.soilMoisture[y][x] * 0.3);
+        cloudFormationRate = clamp(layeredStrength, 0, 1.2);
+
+        if (humidity > 0.9 && temperature < 2) {
+          state.cloudType[y][x] = CLOUD_TYPES.NIMBOSTRATUS;
+        } else if (temperature < -12 && state.iceContent[y][x] > 0.15) {
+          state.cloudType[y][x] = CLOUD_TYPES.CIRRUS;
+        } else {
+          state.cloudType[y][x] = CLOUD_TYPES.ALTOSTRATUS;
+        }
+
+        state.cloudBase[y][x] = state.elevation[y][x] + 400;
+        state.cloudTop[y][x] = state.cloudBase[y][x] + 1200 + layeredStrength * 800;
+      } else if (fog > 0.35) {
         state.cloudType[y][x] = CLOUD_TYPES.STRATUS;
-        cloudFormationRate = state.fogDensity[y][x] * 0.5;
+        cloudFormationRate = fog * 0.6;
         state.cloudBase[y][x] = state.elevation[y][x];
-        state.cloudTop[y][x] = state.elevation[y][x] + 200;
+        state.cloudTop[y][x] = state.elevation[y][x] + 250;
       } else {
         state.cloudType[y][x] = CLOUD_TYPES.NONE;
       }
@@ -347,8 +397,48 @@ export function updateCloudDynamics(
       const microphysics = calculateCloudMicrophysics(state, x, y, updraft);
       state.iceContent[y][x] = microphysics.ice;
 
-      state.cloudCoverage[y][x] = Math.min(1, state.cloudWater[y][x]);
-      state.cloudOpticalDepth[y][x] = state.cloudWater[y][x] * 10;
+      if (
+        precipRate > 0 &&
+        state.precipitationType[y][x] === PRECIP_TYPES.RAIN &&
+        state.temperature[y][x] <= 0
+      ) {
+        state.precipitationType[y][x] = PRECIP_TYPES.FREEZING_RAIN;
+      }
+
+      if (precipRate > 0 && microphysics.graupel > 0.05) {
+        state.precipitationType[y][x] = PRECIP_TYPES.GRAUPEL;
+      }
+
+      const coverageEstimate = calculateCloudCoverage(state, x, y, hour);
+      const waterContribution = clamp(state.cloudWater[y][x] / 1.2, 0, 1);
+      state.cloudCoverage[y][x] = clamp(coverageEstimate * 0.6 + waterContribution * 0.4, 0, 1);
+
+      const opticalMultiplier = (() => {
+        switch (state.cloudType[y][x]) {
+          case CLOUD_TYPES.CIRRUS:
+            return 4;
+          case CLOUD_TYPES.ALTOSTRATUS:
+            return 8;
+          case CLOUD_TYPES.CUMULUS:
+            return 10;
+          case CLOUD_TYPES.CUMULONIMBUS:
+            return 15;
+          case CLOUD_TYPES.OROGRAPHIC:
+            return 12;
+          case CLOUD_TYPES.NIMBOSTRATUS:
+            return 14;
+          case CLOUD_TYPES.STRATUS:
+            return 9;
+          default:
+            return 6;
+        }
+      })();
+
+      state.cloudOpticalDepth[y][x] = clamp(
+        state.cloudWater[y][x] * opticalMultiplier + microphysics.ice * 2 + microphysics.graupel * 4,
+        0,
+        20,
+      );
 
       if (precipRate > 0) {
         if (precip.type === PRECIP_TYPES.SNOW) {
