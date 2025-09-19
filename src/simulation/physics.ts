@@ -140,8 +140,8 @@ export function calculateSolarInsolation(
     const slope = Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy));
     const aspect = Math.atan2(-dzdy, dzdx);
 
-    const sinAltitude = Math.sin(sunAltitude);
-    const cosAltitude = Math.cos(sunAltitude);
+    const sinAltitude = clamp(sunAltitude, 0, 1);
+    const cosAltitude = Math.sqrt(Math.max(0, 1 - sinAltitude * sinAltitude));
     const solarIntensity = Math.max(
         0,
         sinAltitude * Math.cos(slope) + cosAltitude * Math.sin(slope) * Math.cos(aspect - Math.PI)
@@ -335,12 +335,13 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
 
     updateSnowCover(state, newTemperature, sunAltitude, timeFactor);
 
-    if (enableDiffusion) {
+    if (enableDiffusion && timeFactor > 0) {
         const sampleTemperature = (grid: number[][], sx: number, sy: number) => {
             const clampedX = clamp(sx, 0, GRID_SIZE - 1);
             const clampedY = clamp(sy, 0, GRID_SIZE - 1);
             return grid[clampedY][clampedX];
         };
+        const diffusionRate = DIFFUSION_RATE * Math.min(timeFactor, 1);
         for (let i = 0; i < DIFFUSION_ITERATIONS; i++) {
             const diffusedTemp = newTemperature.map(row => [...row]);
             for (let y = 0; y < GRID_SIZE; y++) {
@@ -350,7 +351,7 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
                     const west = sampleTemperature(newTemperature, x - 1, y);
                     const east = sampleTemperature(newTemperature, x + 1, y);
                     const avgNeighborTemp = (north + south + west + east) / 4;
-                    diffusedTemp[y][x] += (avgNeighborTemp - newTemperature[y][x]) * DIFFUSION_RATE;
+                    diffusedTemp[y][x] += (avgNeighborTemp - newTemperature[y][x]) * diffusionRate;
                 }
             }
             newTemperature = diffusedTemp;

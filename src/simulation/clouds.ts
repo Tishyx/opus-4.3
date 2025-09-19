@@ -515,7 +515,8 @@ export function calculateCloudRadiation(
 ): CloudRadiation {
   let solarTransmission = 1;
   if (state.cloudCoverage[y][x] > 0) {
-    const opticalPath = state.cloudOpticalDepth[y][x] / Math.max(0.1, Math.sin(sunAltitude));
+    const sinAltitude = clamp(sunAltitude, 0, 1);
+    const opticalPath = state.cloudOpticalDepth[y][x] / Math.max(0.1, sinAltitude);
     solarTransmission =
       1 - state.cloudCoverage[y][x] + state.cloudCoverage[y][x] * Math.exp(-opticalPath);
   }
