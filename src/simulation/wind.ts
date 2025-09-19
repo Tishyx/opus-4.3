@@ -1,9 +1,55 @@
 import { CELL_SIZE, EPSILON, GRID_SIZE } from '../shared/constants';
 import { LAND_TYPES } from '../shared/types';
-import { resetGrid, resetVectorField, type SimulationState, type VectorField } from './state';
+import { resetGrid, type SimulationState, type VectorField } from './state';
 import { isInBounds } from './utils';
 
 type ExitPoint = { elev: number; x: number; y: number };
+
+const LAND_DRAG_FACTORS: Record<number, number> = {
+  [LAND_TYPES.GRASSLAND]: 0.85,
+  [LAND_TYPES.FOREST]: 0.55,
+  [LAND_TYPES.WATER]: 0.95,
+  [LAND_TYPES.URBAN]: 0.7,
+  [LAND_TYPES.SETTLEMENT]: 0.8,
+};
+
+export function createVegetationDragGetter(
+  state: SimulationState
+): (x: number, y: number) => number {
+  return (x: number, y: number): number => {
+    const landType = state.landCover[y][x];
+    let drag = LAND_DRAG_FACTORS[landType] ?? 0.85;
+
+    if (landType === LAND_TYPES.FOREST) {
+      const depth = state.forestDepth[y][x] || 0;
+      const depthFactor = 1 - Math.min(1, depth / 20) * 0.4;
+      drag *= Math.max(0.2, depthFactor);
+    }
+
+    return drag;
+  };
+}
+
+export function applyBaseWindField(
+  state: SimulationState,
+  baseWindSpeed: number,
+  windDir: number,
+  getVegetationDrag: (x: number, y: number) => number
+): void {
+  const windDirRad = (windDir * Math.PI) / 180;
+  const baseX = Math.sin(windDirRad);
+  const baseY = -Math.cos(windDirRad);
+
+  for (let y = 0; y < GRID_SIZE; y++) {
+    for (let x = 0; x < GRID_SIZE; x++) {
+      const vegetationDrag = getVegetationDrag(x, y);
+      const cell = state.windVectorField[y][x];
+      cell.x = baseX * baseWindSpeed * vegetationDrag;
+      cell.y = baseY * baseWindSpeed * vegetationDrag;
+      cell.speed = Math.sqrt(cell.x * cell.x + cell.y * cell.y);
+    }
+  }
+}
 
 function clampCoord(value: number): number {
   if (value < 0) {
@@ -68,35 +114,17 @@ export function calculateDownslopeWinds(
   windGustiness: number
 ): void {
   resetGrid(state.downSlopeWinds, 0);
-  resetVectorField(state.windVectorField);
   resetGrid(state.foehnEffect, 0);
 
   const isNightTime = hour <= 6 || hour >= 19;
   const windDirRad = (windDir * Math.PI) / 180;
+  const getVegetationDrag = createVegetationDragGetter(state);
 
-  const landDragFactors: Record<number, number> = {
-    [LAND_TYPES.GRASSLAND]: 0.85,
-    [LAND_TYPES.FOREST]: 0.55,
-    [LAND_TYPES.WATER]: 0.95,
-    [LAND_TYPES.URBAN]: 0.7,
-    [LAND_TYPES.SETTLEMENT]: 0.8,
-  };
-
-  const getVegetationDrag = (x: number, y: number): number => {
-    const landType = state.landCover[y][x];
-    let drag = landDragFactors[landType] ?? 0.85;
-
-    if (landType === LAND_TYPES.FOREST) {
-      const depth = state.forestDepth[y][x] || 0;
-      const depthFactor = 1 - Math.min(1, depth / 20) * 0.4;
-      drag *= Math.max(0.2, depthFactor);
-    }
-
-    return drag;
-  };
+  applyBaseWindField(state, baseWindSpeed, windDir, getVegetationDrag);
 
   for (let y = 2; y < GRID_SIZE - 2; y++) {
     for (let x = 2; x < GRID_SIZE - 2; x++) {
+      const vegetationDrag = getVegetationDrag(x, y);
       const dzdx = (state.elevation[y][x + 2] - state.elevation[y][x - 2]) / (4 * CELL_SIZE);
       const dzdy = (state.elevation[y + 2][x] - state.elevation[y - 2][x]) / (4 * CELL_SIZE);
 
@@ -122,9 +150,10 @@ export function calculateDownslopeWinds(
         if (isSurfaceSlope) {
           const coldAirFlow = katabaticStrength * 0.8;
           if (slope > EPSILON) {
-            state.windVectorField[y][x].x = (-dzdx / slope) * coldAirFlow * 5;
-            state.windVectorField[y][x].y = (-dzdy / slope) * coldAirFlow * 5;
-            state.windVectorField[y][x].speed = coldAirFlow * 5;
+            const flowX = (-dzdx / slope) * coldAirFlow * 5 * vegetationDrag;
+            const flowY = (-dzdy / slope) * coldAirFlow * 5 * vegetationDrag;
+            state.windVectorField[y][x].x += flowX;
+            state.windVectorField[y][x].y += flowY;
             state.downSlopeWinds[y][x] = -coldAirFlow * 1.5;
           }
         }
@@ -155,12 +184,8 @@ export function calculateDownslopeWinds(
           const foehnStrength = Math.min(1, descentHeight / 100) * (baseWindSpeed / 30);
           state.foehnEffect[y][x] = Math.min(12, adiabaticWarming * foehnStrength);
 
-          state.windVectorField[y][x].x += windX * foehnStrength * 10;
-          state.windVectorField[y][x].y += windY * foehnStrength * 10;
-          state.windVectorField[y][x].speed = Math.sqrt(
-            state.windVectorField[y][x].x * state.windVectorField[y][x].x +
-              state.windVectorField[y][x].y * state.windVectorField[y][x].y
-          );
+          state.windVectorField[y][x].x += windX * foehnStrength * 10 * vegetationDrag;
+          state.windVectorField[y][x].y += windY * foehnStrength * 10 * vegetationDrag;
         }
       }
 
@@ -245,8 +270,8 @@ export function calculateDownslopeWinds(
           const blendedVecX = windX * (1 - channelStrength) + channeledVecX * channelStrength;
           const blendedVecY = windY * (1 - channelStrength) + channeledVecY * channelStrength;
 
-          state.windVectorField[y][x].x += blendedVecX * finalValleySpeed * 0.8;
-          state.windVectorField[y][x].y += blendedVecY * finalValleySpeed * 0.8;
+          state.windVectorField[y][x].x += blendedVecX * finalValleySpeed * 0.8 * vegetationDrag;
+          state.windVectorField[y][x].y += blendedVecY * finalValleySpeed * 0.8 * vegetationDrag;
         }
       }
     }
@@ -272,24 +297,15 @@ export function calculateDownslopeWinds(
         const thermalTurbulence = (state.thermalStrength[y][x] || 0) / 15;
 
         const gustFactor = (windGustiness / 100) * (1 + roughness + thermalTurbulence);
-        const localWindSpeed =
-          Math.sqrt(state.windVectorField[y][x].x ** 2 + state.windVectorField[y][x].y ** 2) + baseWindSpeed;
+        const localWindSpeed = Math.sqrt(
+          state.windVectorField[y][x].x ** 2 + state.windVectorField[y][x].y ** 2
+        );
         const vegetationDrag = getVegetationDrag(x, y);
         const gustMagnitude = localWindSpeed * gustFactor * 0.5 * vegetationDrag;
 
         state.windVectorField[y][x].x += (Math.random() - 0.5) * 2 * gustMagnitude;
         state.windVectorField[y][x].y += (Math.random() - 0.5) * 2 * gustMagnitude;
       }
-    }
-  }
-
-  for (let y = 0; y < GRID_SIZE; y++) {
-    for (let x = 0; x < GRID_SIZE; x++) {
-      const vec = state.windVectorField[y][x];
-      const vegetationDrag = getVegetationDrag(x, y);
-      vec.x *= vegetationDrag;
-      vec.y *= vegetationDrag;
-      vec.speed = Math.sqrt(vec.x * vec.x + vec.y * vec.y);
     }
   }
 
