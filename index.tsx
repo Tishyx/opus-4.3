@@ -6,13 +6,17 @@ import {
 import {
     createSimulationState,
     resetGrid,
-    resetVectorField,
     resizeCanvas,
     type SimulationState,
 } from './src/simulation/state';
 import { initializeEnvironment } from './src/simulation/environment';
 import { updateCloudDynamics } from './src/simulation/clouds';
-import { advectGrid, calculateDownslopeWinds } from './src/simulation/wind';
+import {
+    advectGrid,
+    applyBaseWindField,
+    calculateDownslopeWinds,
+    createVegetationDragGetter,
+} from './src/simulation/wind';
 import { updateFogSimulation } from './src/simulation/fog';
 import { initializeSoilMoisture } from './src/simulation/soil';
 import {
@@ -89,8 +93,9 @@ function runSimulation(simDeltaTimeMinutes: number): void {
         calculateDownslopeWinds(state, currentHour, windSpeed, windDir, windGustiness);
     } else {
         resetGrid(state.downSlopeWinds, 0);
-        resetVectorField(state.windVectorField);
         resetGrid(state.foehnEffect, 0);
+        const getVegetationDrag = createVegetationDragGetter(state);
+        applyBaseWindField(state, windSpeed, windDir, getVegetationDrag);
     }
 
     if (enableAdvection && timeFactor > 0) {
