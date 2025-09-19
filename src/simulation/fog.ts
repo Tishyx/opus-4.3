@@ -8,7 +8,7 @@ import {
   GRID_SIZE,
 } from '../shared/constants';
 import type { SimulationState } from './state';
-import { clamp } from './utils';
+import { clamp, computeBoundaryDamping, isInBounds } from './utils';
 
 export function updateFogSimulation(
   state: SimulationState,
@@ -56,16 +56,20 @@ export function updateFogSimulation(
   }
 
   const newFogDensity = state.fogDensity.map((row) => [...row]);
-  for (let y = 1; y < GRID_SIZE - 1; y++) {
-    for (let x = 1; x < GRID_SIZE - 1; x++) {
+  for (let y = 0; y < GRID_SIZE; y++) {
+    for (let x = 0; x < GRID_SIZE; x++) {
       newFogDensity[y][x] += fogChangeRate[y][x] * timeFactor;
 
       const wind = state.windVectorField[y][x];
       if (wind.speed > 0.5) {
-        const upwindX = clamp(Math.round(x - wind.x * 0.2), 0, GRID_SIZE - 1);
-        const upwindY = clamp(Math.round(y - wind.y * 0.2), 0, GRID_SIZE - 1);
+        const rawUpwindX = x - wind.x * 0.2;
+        const rawUpwindY = y - wind.y * 0.2;
+        const upwindX = clamp(Math.round(rawUpwindX), 0, GRID_SIZE - 1);
+        const upwindY = clamp(Math.round(rawUpwindY), 0, GRID_SIZE - 1);
+        const boundaryFactor = computeBoundaryDamping(rawUpwindX, rawUpwindY);
+        const sourceFog = state.fogDensity[upwindY][upwindX] * boundaryFactor;
         const advectionChange =
-          (state.fogDensity[upwindY][upwindX] - state.fogDensity[y][x]) *
+          (sourceFog - state.fogDensity[y][x]) *
           FOG_ADVECTION_RATE *
           Math.min(1, wind.speed / 10);
         newFogDensity[y][x] += advectionChange * timeFactor;
@@ -78,6 +82,9 @@ export function updateFogSimulation(
           if (dx === 0 && dy === 0) continue;
           const nx = x + dx;
           const ny = y + dy;
+          if (!isInBounds(nx, ny)) {
+            continue;
+          }
           const elevDiff = state.elevation[ny][nx] - state.elevation[y][x];
           if (elevDiff > 0) {
             highNeighborFog += state.fogDensity[ny][nx] * elevDiff;
@@ -91,9 +98,25 @@ export function updateFogSimulation(
         newFogDensity[y][x] += downslopeChange * timeFactor;
       }
 
-      const avgNeighborFog =
-        (state.fogDensity[y - 1][x] + state.fogDensity[y + 1][x] + state.fogDensity[y][x - 1] + state.fogDensity[y][x + 1]) /
-        4;
+      const neighborOffsets: Array<[number, number]> = [
+        [0, -1],
+        [0, 1],
+        [-1, 0],
+        [1, 0],
+      ];
+      let neighborSum = 0;
+      let neighborCount = 0;
+      for (const [dx, dy] of neighborOffsets) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (isInBounds(nx, ny)) {
+          neighborSum += state.fogDensity[ny][nx];
+        } else {
+          neighborSum += state.fogDensity[y][x];
+        }
+        neighborCount++;
+      }
+      const avgNeighborFog = neighborSum / Math.max(1, neighborCount);
       const diffusionChange = (avgNeighborFog - state.fogDensity[y][x]) * FOG_DIFFUSION_RATE;
       newFogDensity[y][x] += diffusionChange * timeFactor;
     }

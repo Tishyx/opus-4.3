@@ -15,6 +15,18 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+export function computeBoundaryDamping(x: number, y: number): number {
+  const maxIndex = GRID_SIZE - 1;
+  const overflowX = x < 0 ? -x : x > maxIndex ? x - maxIndex : 0;
+  const overflowY = y < 0 ? -y : y > maxIndex ? y - maxIndex : 0;
+  const overflow = overflowX + overflowY;
+  if (overflow <= 0) {
+    return 1;
+  }
+
+  return Math.exp(-overflow * 0.5);
+}
+
 export function distance(x1: number, y1: number, x2: number, y2: number): number {
   return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
 }
