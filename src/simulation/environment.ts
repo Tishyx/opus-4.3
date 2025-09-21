@@ -8,24 +8,60 @@ import type { SimulationState } from './state';
 import { CLOUD_TYPES, PRECIP_TYPES } from './weatherTypes';
 import { clamp, distance, isInBounds } from './utils';
 
+function isFiniteNumber(value: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 function clampGridIndex(value: number): number {
-  return Math.max(0, Math.min(GRID_SIZE - 1, value));
+  if (!isFiniteNumber(value)) {
+    return 0;
+  }
+
+  const integerValue = Math.round(value);
+  if (integerValue <= 0) {
+    return 0;
+  }
+  if (integerValue >= GRID_SIZE - 1) {
+    return GRID_SIZE - 1;
+  }
+  return integerValue;
+}
+
+function normalizeFraction(fraction: number): number {
+  if (!isFiniteNumber(fraction)) {
+    return 0;
+  }
+
+  if (fraction <= 0) return 0;
+  if (fraction >= 1) return 1;
+  return fraction;
 }
 
 function fractionToGridStart(fraction: number): number {
-  return clampGridIndex(Math.floor(fraction * GRID_SIZE));
+  const safeFraction = normalizeFraction(fraction);
+  return clampGridIndex(Math.floor(safeFraction * GRID_SIZE));
 }
 
 function fractionToGridEndExclusive(fraction: number): number {
-  return Math.min(GRID_SIZE, Math.ceil(fraction * GRID_SIZE));
+  const safeFraction = normalizeFraction(fraction);
+  const rawIndex = Math.ceil(safeFraction * GRID_SIZE);
+  if (!isFiniteNumber(rawIndex)) {
+    return GRID_SIZE;
+  }
+  return Math.max(0, Math.min(GRID_SIZE, rawIndex));
 }
 
 function fractionToGridIndex(fraction: number): number {
-  return clampGridIndex(Math.round((GRID_SIZE - 1) * fraction));
+  const safeFraction = normalizeFraction(fraction);
+  return clampGridIndex(Math.round((GRID_SIZE - 1) * safeFraction));
 }
 
 function scaleByGrid(fraction: number, minimum = 1): number {
-  return Math.max(minimum, Math.round(GRID_SIZE * fraction));
+  const safeMinimum = isFiniteNumber(minimum) ? Math.max(1, Math.round(minimum)) : 1;
+  const safeFraction = isFiniteNumber(fraction) ? fraction : 0;
+  const scaled = Math.round(GRID_SIZE * safeFraction);
+  const safeScaled = isFiniteNumber(scaled) ? scaled : 0;
+  return Math.max(safeMinimum, safeScaled);
 }
 
 function generatePerlinNoise(): number[][] {

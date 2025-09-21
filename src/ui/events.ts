@@ -38,13 +38,26 @@ function getLabel(map: Record<number, string>, value: number | undefined, fallba
     return map[value] ?? fallback;
 }
 
+function sanitizeFractionDigits(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 0;
+    }
+    return Math.max(0, Math.floor(value));
+}
+
 function formatPercentage(value: number, fractionDigits = 0): string {
-    return `${(value * 100).toFixed(fractionDigits)}%`;
+    const safeValue = Number.isFinite(value) ? value : 0;
+    const safeDigits = sanitizeFractionDigits(fractionDigits);
+    return `${(safeValue * 100).toFixed(safeDigits)}%`;
 }
 
 function formatWindDirection(xComponent: number, yComponent: number): string | null {
+    if (!Number.isFinite(xComponent) || !Number.isFinite(yComponent)) {
+        return null;
+    }
+
     const magnitude = Math.hypot(xComponent, yComponent);
-    if (magnitude < 0.01) {
+    if (!Number.isFinite(magnitude) || magnitude < 0.01) {
         return null;
     }
 
@@ -56,13 +69,16 @@ function formatWindDirection(xComponent: number, yComponent: number): string | n
 }
 
 function formatCloudHeights(base: number, top: number): string {
-    if (base <= 0 && top <= 0) {
+    const safeBase = Number.isFinite(base) ? base : 0;
+    const safeTop = Number.isFinite(top) ? top : 0;
+
+    if (safeBase <= 0 && safeTop <= 0) {
         return 'None';
     }
-    if (top <= base) {
-        return `${base.toFixed(0)} m`;
+    if (safeTop <= safeBase) {
+        return `${safeBase.toFixed(0)} m`;
     }
-    return `${base.toFixed(0)} - ${top.toFixed(0)} m`;
+    return `${safeBase.toFixed(0)} - ${safeTop.toFixed(0)} m`;
 }
 
 function showTooltip(

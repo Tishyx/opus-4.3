@@ -116,7 +116,7 @@ export function createSimulationState(): SimulationState {
     isSimulating: false,
     simulationTime: 6 * 60,
     simulationSpeed: 10,
-    lastFrameTime: performance.now(),
+    lastFrameTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
   };
 }
 
