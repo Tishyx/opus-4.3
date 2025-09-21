@@ -59,9 +59,26 @@ function readNumericSelectValue(id: string): number {
 
 function readNumericInputValue(id: string): number {
     const input = getElement<HTMLInputElement>(id);
+    const clampToRange = (value: number): number => {
+        const min = input.min !== '' ? Number.parseFloat(input.min) : undefined;
+        const max = input.max !== '' ? Number.parseFloat(input.max) : undefined;
+        let result = value;
+        if (min !== undefined && Number.isFinite(min)) {
+            result = Math.max(result, min);
+        }
+        if (max !== undefined && Number.isFinite(max)) {
+            result = Math.min(result, max);
+        }
+        return result;
+    };
+
     const parsed = Number.parseFloat(input.value);
     if (!Number.isNaN(parsed)) {
-        return parsed;
+        const clamped = clampToRange(parsed);
+        if (clamped !== parsed) {
+            input.value = clamped.toString();
+        }
+        return clamped;
     }
 
     const fallbacks = [input.defaultValue, input.min, input.max];
@@ -69,8 +86,9 @@ function readNumericInputValue(id: string): number {
         if (!fallback) continue;
         const fallbackValue = Number.parseFloat(fallback);
         if (!Number.isNaN(fallbackValue)) {
-            input.value = fallbackValue.toString();
-            return fallbackValue;
+            const clamped = clampToRange(fallbackValue);
+            input.value = clamped.toString();
+            return clamped;
         }
     }
 

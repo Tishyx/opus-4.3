@@ -74,8 +74,8 @@ export function applyBaseWindField(
   getVegetationDrag: (x: number, y: number) => number
 ): void {
   const windDirRad = (windDir * Math.PI) / 180;
-  const baseX = Math.sin(windDirRad);
-  const baseY = -Math.cos(windDirRad);
+  const baseX = -Math.sin(windDirRad);
+  const baseY = Math.cos(windDirRad);
 
   for (let y = 0; y < GRID_SIZE; y++) {
     for (let x = 0; x < GRID_SIZE; x++) {
@@ -190,8 +190,8 @@ export function calculateDownslopeWinds(
       }
 
       if (baseWindSpeed > 10 && slopeAngle > 0.15) {
-        const windX = Math.sin(windDirRad);
-        const windY = -Math.cos(windDirRad);
+        const windX = -Math.sin(windDirRad);
+        const windY = Math.cos(windDirRad);
 
         let isLeeSide = false;
         let maxUpwindHeight = state.elevation[y][x];
@@ -284,8 +284,8 @@ export function calculateDownslopeWinds(
             }
           }
 
-          const windX = Math.sin(windDirRad);
-          const windY = -Math.cos(windDirRad);
+          const windX = -Math.sin(windDirRad);
+          const windY = Math.cos(windDirRad);
           const alignment = windX * valleyDirection.x + windY * valleyDirection.y;
 
           const narrownessFactor = Math.max(0, (15 - valleyWidth) / 15);

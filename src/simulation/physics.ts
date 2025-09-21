@@ -370,14 +370,25 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
 }
 
 export function calculateSimulationMetrics(state: SimulationState): SimulationMetrics {
-    const flatTemp = state.temperature.flat();
-    const minTemperature = Math.min(...flatTemp);
-    const maxTemperature = Math.max(...flatTemp);
-    const avgTemperature = flatTemp.reduce((sum, value) => sum + value, 0) / (GRID_SIZE * GRID_SIZE);
+    const totalCells = GRID_SIZE * GRID_SIZE;
 
-    const totalPrecipitation = state.precipitation.flat().reduce((sum, value) => sum + value, 0);
-    const maxCloudHeight = Math.max(...state.cloudTop.flat());
-    const avgSnowDepth = state.snowDepth.flat().reduce((sum, value) => sum + value, 0) / (GRID_SIZE * GRID_SIZE);
+    const temperatureValues = state.temperature.flat().filter(Number.isFinite);
+    const minTemperature = temperatureValues.length > 0 ? Math.min(...temperatureValues) : 0;
+    const maxTemperature = temperatureValues.length > 0 ? Math.max(...temperatureValues) : 0;
+    const avgTemperature =
+        temperatureValues.length > 0
+            ? temperatureValues.reduce((sum, value) => sum + value, 0) / temperatureValues.length
+            : 0;
+
+    const precipitationValues = state.precipitation.flat().filter(Number.isFinite);
+    const totalPrecipitation =
+        precipitationValues.reduce((sum, value) => sum + value, 0) / totalCells;
+
+    const cloudHeights = state.cloudTop.flat().filter(Number.isFinite);
+    const maxCloudHeight = cloudHeights.length > 0 ? Math.max(...cloudHeights) : 0;
+
+    const snowDepthValues = state.snowDepth.flat().filter(Number.isFinite);
+    const avgSnowDepth = snowDepthValues.reduce((sum, value) => sum + value, 0) / totalCells;
 
     return {
         minTemperature,
