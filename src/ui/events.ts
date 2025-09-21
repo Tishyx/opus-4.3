@@ -4,13 +4,14 @@ import { calculateContiguousAreas, calculateDistanceFields, calculateHillshade }
 import { initializeSoilMoisture } from '../simulation/soil';
 import type { SimulationState } from '../simulation/state';
 import { clamp, describeSurface, distance, isInBounds, resolveLandType, resolveSoilType } from '../simulation/utils';
-import { initializeControlReadouts, resetPlayButton, updatePlayButton } from './controls';
+import { initializeControlReadouts, resetPlayButton, updatePlayButton, updateTimeOfDayControl } from './controls';
 import { CLOUD_TYPES, PRECIP_TYPES } from '../simulation/weatherTypes';
 
 export type SimulationEventCallbacks = {
     runSimulationFrame: () => void;
     redraw: () => void;
     initializeGrids: () => void;
+    seekToTimeOfDay: (targetMinutes: number) => void;
 };
 
 function toTitleCase(identifier: string): string {
@@ -442,7 +443,8 @@ function bindControlSynchronizers(
 function bindSimulationControls(
     state: SimulationState,
     callbacks: SimulationEventCallbacks,
-    onEnvironmentReset: () => void
+    onEnvironmentReset: () => void,
+    onStateUpdated: () => void
 ): void {
     const playPauseButton = document.getElementById('playPauseBtn') as HTMLButtonElement | null;
     playPauseButton?.addEventListener('click', () => {
@@ -475,6 +477,24 @@ function bindSimulationControls(
         if (label) label.textContent = `${value}x`;
         state.simulationSpeed = value;
     });
+
+    const timeSlider = document.getElementById('timeOfDay') as HTMLInputElement | null;
+    timeSlider?.addEventListener('input', event => {
+        const sliderMinutes = Number.parseInt((event.target as HTMLInputElement).value, 10);
+        if (!Number.isFinite(sliderMinutes)) return;
+        updateTimeOfDayControl(sliderMinutes);
+    });
+
+    timeSlider?.addEventListener('change', event => {
+        const sliderMinutes = Number.parseInt((event.target as HTMLInputElement).value, 10);
+        if (!Number.isFinite(sliderMinutes)) return;
+
+        state.isSimulating = false;
+        updatePlayButton(false);
+
+        callbacks.seekToTimeOfDay(sliderMinutes);
+        onStateUpdated();
+    });
 }
 
 export function setupEventListeners(
@@ -505,7 +525,7 @@ export function setupEventListeners(
     bindBrushButtons(state);
     bindBrushCategorySwitch(state);
     bindControlSynchronizers(state, callbacks, resetSelectedCell, refreshSelectedCell);
-    bindSimulationControls(state, callbacks, resetSelectedCell);
+    bindSimulationControls(state, callbacks, resetSelectedCell, refreshSelectedCell);
 
     canvas.addEventListener('mousedown', event => {
         state.isDrawing = true;
