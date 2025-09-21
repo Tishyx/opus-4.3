@@ -200,7 +200,7 @@ export function calculateContiguousAreas(state: SimulationState): void {
   state.contiguousAreas = Array(GRID_SIZE)
     .fill(null)
     .map(() => Array(GRID_SIZE).fill(0));
-  state.areasizes = new Map();
+  state.areaSizes = new Map();
   let areaId = 0;
   const visited = Array(GRID_SIZE)
     .fill(null)
@@ -235,7 +235,7 @@ export function calculateContiguousAreas(state: SimulationState): void {
       }
     }
 
-    state.areasizes.set(areaId, cells.length);
+    state.areaSizes.set(areaId, cells.length);
     return cells;
   }
 

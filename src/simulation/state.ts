@@ -31,7 +31,7 @@ export interface SimulationState {
   forestDepth: Grid<number>;
   urbanDistance: Grid<number>;
   contiguousAreas: Grid<number>;
-  areasizes: Map<number, number>;
+  areaSizes: Map<number, number>;
   inversionHeight: number;
   inversionStrength: number;
   fogDensity: Grid<number>;
@@ -82,7 +82,7 @@ export function createSimulationState(): SimulationState {
     forestDepth: createGrid(0),
     urbanDistance: createGrid(Number.POSITIVE_INFINITY),
     contiguousAreas: createGrid(0),
-    areasizes: new Map<number, number>(),
+    areaSizes: new Map<number, number>(),
     inversionHeight: 0,
     inversionStrength: 0,
     fogDensity: createGrid(0),

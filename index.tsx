@@ -67,7 +67,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     } = readSimulationControls();
 
     const totalMinutesInDay = 24 * 60;
-    const normalizedTime = state.simulationTime % totalMinutesInDay;
+    const normalizedTime = ((state.simulationTime % totalMinutesInDay) + totalMinutesInDay) % totalMinutesInDay;
     const currentHour = Math.floor(normalizedTime / 60);
     const currentMinute = Math.floor(normalizedTime % 60);
 

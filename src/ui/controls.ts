@@ -171,10 +171,11 @@ export function updateInversionDisplay(state: SimulationState, enabled: boolean)
 export function updateSimulationClock(simulationMinutes: number): void {
     const safeMinutes = Number.isFinite(simulationMinutes) ? simulationMinutes : 0;
     const totalMinutesInDay = 24 * 60;
-    const normalizedTime = safeMinutes % totalMinutesInDay;
+    const normalizedTime = ((safeMinutes % totalMinutesInDay) + totalMinutesInDay) % totalMinutesInDay;
     const currentHour = Math.floor(normalizedTime / 60);
     const currentMinute = Math.floor(normalizedTime % 60);
-    const day = Math.floor(safeMinutes / totalMinutesInDay) + 1;
+    const dayIndex = Math.floor(safeMinutes / totalMinutesInDay);
+    const day = Math.max(0, dayIndex) + 1;
 
     getElement<HTMLElement>('simDay').textContent = `Day ${day}`;
     getElement<HTMLElement>('simTime').textContent = `${String(currentHour).padStart(2, '0')}:${String(

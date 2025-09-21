@@ -80,8 +80,8 @@ export function updateFogSimulation(
 
       dissipationRate += (1 - relativeHumidity) * 0.15;
 
-      if (state.downSlopeWinds[y][x] > 0) {
-        dissipationRate += state.downSlopeWinds[y][x] * 0.12;
+      if (state.downSlopeWinds[y][x] < 0) {
+        dissipationRate += Math.abs(state.downSlopeWinds[y][x]) * 0.12;
       }
 
       if (currentFog > 0.6) {
