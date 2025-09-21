@@ -74,8 +74,8 @@ function calculateOrographicClouds(
   }
 
   const windDirRad = (windDir * Math.PI) / 180;
-  const windX = Math.sin(windDirRad);
-  const windY = -Math.cos(windDirRad);
+  const windX = -Math.sin(windDirRad);
+  const windY = Math.cos(windDirRad);
 
   let isWindward = false;
   let liftAmount = 0;

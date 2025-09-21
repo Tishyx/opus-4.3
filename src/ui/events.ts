@@ -48,7 +48,8 @@ function sanitizeFractionDigits(value: number): number {
 function formatPercentage(value: number, fractionDigits = 0): string {
     const safeValue = Number.isFinite(value) ? value : 0;
     const safeDigits = sanitizeFractionDigits(fractionDigits);
-    return `${(safeValue * 100).toFixed(safeDigits)}%`;
+    const clamped = clamp(safeValue, 0, 1);
+    return `${(clamped * 100).toFixed(safeDigits)}%`;
 }
 
 function formatWindDirection(xComponent: number, yComponent: number): string | null {
@@ -61,7 +62,7 @@ function formatWindDirection(xComponent: number, yComponent: number): string | n
         return null;
     }
 
-    const angle = (Math.atan2(yComponent, xComponent) * 180) / Math.PI;
+    const angle = (Math.atan2(-yComponent, xComponent) * 180) / Math.PI;
     const normalized = (angle + 360) % 360;
     const directions = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
     const index = Math.round(normalized / 45) % directions.length;
