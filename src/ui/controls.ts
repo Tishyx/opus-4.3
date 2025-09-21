@@ -168,19 +168,47 @@ export function updateInversionDisplay(state: SimulationState, enabled: boolean)
     }
 }
 
-export function updateSimulationClock(simulationMinutes: number): void {
-    const safeMinutes = Number.isFinite(simulationMinutes) ? simulationMinutes : 0;
-    const totalMinutesInDay = 24 * 60;
-    const normalizedTime = ((safeMinutes % totalMinutesInDay) + totalMinutesInDay) % totalMinutesInDay;
+const TOTAL_MINUTES_IN_DAY = 24 * 60;
+const TIME_SLIDER_STEP_MINUTES = 15;
+
+function normalizeToDay(minutes: number): number {
+    if (!Number.isFinite(minutes)) {
+        return 0;
+    }
+    return ((minutes % TOTAL_MINUTES_IN_DAY) + TOTAL_MINUTES_IN_DAY) % TOTAL_MINUTES_IN_DAY;
+}
+
+function formatTimeLabel(minutes: number): string {
+    const normalizedTime = normalizeToDay(minutes);
     const currentHour = Math.floor(normalizedTime / 60);
     const currentMinute = Math.floor(normalizedTime % 60);
-    const dayIndex = Math.floor(safeMinutes / totalMinutesInDay);
+    return `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+}
+
+export function updateSimulationClock(simulationMinutes: number): void {
+    const safeMinutes = Number.isFinite(simulationMinutes) ? simulationMinutes : 0;
+    const dayIndex = Math.floor(safeMinutes / TOTAL_MINUTES_IN_DAY);
     const day = Math.max(0, dayIndex) + 1;
 
     getElement<HTMLElement>('simDay').textContent = `Day ${day}`;
-    getElement<HTMLElement>('simTime').textContent = `${String(currentHour).padStart(2, '0')}:${String(
-        currentMinute
-    ).padStart(2, '0')}`;
+    getElement<HTMLElement>('simTime').textContent = formatTimeLabel(safeMinutes);
+}
+
+export function updateTimeOfDayControl(simulationMinutes: number): void {
+    const slider = document.getElementById('timeOfDay') as HTMLInputElement | null;
+    const label = document.getElementById('timeOfDayValue');
+    const safeMinutes = Number.isFinite(simulationMinutes) ? simulationMinutes : 0;
+    const normalizedTime = normalizeToDay(safeMinutes);
+
+    if (slider) {
+        const stepAligned = Math.round(normalizedTime / TIME_SLIDER_STEP_MINUTES) * TIME_SLIDER_STEP_MINUTES;
+        const clamped = Math.min(Math.max(0, stepAligned), TOTAL_MINUTES_IN_DAY - 1);
+        slider.value = clamped.toString();
+    }
+
+    if (label) {
+        label.textContent = formatTimeLabel(safeMinutes);
+    }
 }
 
 export function initializeControlReadouts(): void {
@@ -189,6 +217,7 @@ export function initializeControlReadouts(): void {
     getElement<HTMLElement>('brushSizeValue').textContent = readNumericInputValue('brushSize').toString();
     getElement<HTMLElement>('terrainStrengthValue').textContent = readNumericInputValue('terrainStrength').toString();
     getElement<HTMLElement>('speedValue').textContent = `${readNumericInputValue('simSpeed')}x`;
+    updateTimeOfDayControl(readNumericInputValue('timeOfDay'));
 }
 
 function buildPlayButtonMarkup(isSimulating: boolean): string {

@@ -30,6 +30,7 @@ import {
     updateInversionDisplay,
     updateMetricsDisplay,
     updateSimulationClock,
+    updateTimeOfDayControl,
 } from './src/ui/controls';
 import { drawSimulation } from './src/ui/rendering';
 import { setupEventListeners, type SimulationEventCallbacks } from './src/ui/events';
@@ -72,6 +73,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     const currentMinute = Math.floor(normalizedTime % 60);
 
     updateSimulationClock(state.simulationTime);
+    updateTimeOfDayControl(state.simulationTime);
 
     const timeOfDay = currentHour + currentMinute / 60;
     const monthValue = toMonthValue(month);
@@ -175,6 +177,18 @@ const eventCallbacks: SimulationEventCallbacks = {
     runSimulationFrame: () => runSimulation(0),
     redraw: () => drawSimulation(ctx, state, readVisualizationToggles()),
     initializeGrids,
+    seekToTimeOfDay: targetMinutes => {
+        const totalMinutesInDay = 24 * 60;
+        const normalizedTarget = ((targetMinutes % totalMinutesInDay) + totalMinutesInDay) % totalMinutesInDay;
+        const currentNormalized = ((state.simulationTime % totalMinutesInDay) + totalMinutesInDay) % totalMinutesInDay;
+        let deltaMinutes = normalizedTarget - currentNormalized;
+        if (deltaMinutes < 0) {
+            deltaMinutes += totalMinutesInDay;
+        }
+
+        state.simulationTime += deltaMinutes;
+        runSimulation(deltaMinutes);
+    },
 };
 
 setupEventListeners(state, canvas, tooltip, eventCallbacks);

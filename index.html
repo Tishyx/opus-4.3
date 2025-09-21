@@ -55,6 +55,12 @@
                             <span id="simDay">Day 1</span>, <span id="simTime">06:00</span>
                         </div>
                         <div class="control-group">
+                            <label for="timeOfDay">
+                                Time of Day: <span class="range-value" id="timeOfDayValue">06:00</span>
+                            </label>
+                            <input type="range" id="timeOfDay" min="0" max="1439" value="360" step="15">
+                        </div>
+                        <div class="control-group">
                             <label>Simulation Speed: <span class="range-value" id="speedValue">1x</span></label>
                             <input type="range" id="simSpeed" min="1" max="60" value="10" step="1">
                         </div>
