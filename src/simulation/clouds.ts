@@ -494,7 +494,7 @@ export function updateCloudDynamics(
         if (precip.type === PRECIP_TYPES.SNOW) {
           const snowAccumulation = precipRate * 10 * timeFactor;
           state.snowDepth[y][x] += snowAccumulation;
-          state.latentHeatEffect[y][x] += precipRate * 0.8;
+          state.latentHeatEffect[y][x] += precipRate * 0.8 * timeFactor;
         } else {
           const thermalProps = getThermalProperties(state, x, y);
           const infiltration = Math.min(precipRate * timeFactor, 1 - state.soilMoisture[y][x]);

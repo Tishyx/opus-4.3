@@ -296,8 +296,9 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
 
                 airEnergyBalance += state.inversionAndDownslopeRate[y][x];
 
-                if (state.latentHeatEffect[y][x] > 0) {
-                    airEnergyBalance += state.latentHeatEffect[y][x] / timeFactor;
+                const latentEffect = state.latentHeatEffect[y][x];
+                if (latentEffect !== 0) {
+                    airEnergyBalance += latentEffect;
                 }
 
                 const humidity = clamp(state.humidity[y][x], 0, 1);
