@@ -94,6 +94,13 @@ function readHeatmapPaletteValue(): HeatmapPalette {
     return fallback;
 }
 
+function formatMetricValue(value: number, fractionDigits: number): string {
+    if (!Number.isFinite(value)) {
+        return '—';
+    }
+    return value.toFixed(Math.max(0, fractionDigits));
+}
+
 export function readSimulationControls(): SimulationControls {
     return {
         month: readNumericSelectValue('month'),
@@ -124,12 +131,12 @@ export function readVisualizationToggles(): VisualizationToggles {
 }
 
 export function updateMetricsDisplay(metrics: SimulationMetrics): void {
-    getElement<HTMLElement>('minTemp').textContent = `${metrics.minTemperature.toFixed(1)}°C`;
-    getElement<HTMLElement>('maxTemp').textContent = `${metrics.maxTemperature.toFixed(1)}°C`;
-    getElement<HTMLElement>('avgTemp').textContent = `${metrics.avgTemperature.toFixed(1)}°C`;
-    getElement<HTMLElement>('totalPrecip').textContent = `${metrics.totalPrecipitation.toFixed(2)}mm/hr`;
-    getElement<HTMLElement>('maxCloudHeight').textContent = `${metrics.maxCloudHeight.toFixed(0)}m`;
-    getElement<HTMLElement>('avgSnowDepth').textContent = `${metrics.avgSnowDepth.toFixed(1)}cm`;
+    getElement<HTMLElement>('minTemp').textContent = `${formatMetricValue(metrics.minTemperature, 1)}°C`;
+    getElement<HTMLElement>('maxTemp').textContent = `${formatMetricValue(metrics.maxTemperature, 1)}°C`;
+    getElement<HTMLElement>('avgTemp').textContent = `${formatMetricValue(metrics.avgTemperature, 1)}°C`;
+    getElement<HTMLElement>('totalPrecip').textContent = `${formatMetricValue(metrics.totalPrecipitation, 2)}mm/hr`;
+    getElement<HTMLElement>('maxCloudHeight').textContent = `${formatMetricValue(metrics.maxCloudHeight, 0)}m`;
+    getElement<HTMLElement>('avgSnowDepth').textContent = `${formatMetricValue(metrics.avgSnowDepth, 1)}cm`;
 }
 
 export function updateInversionDisplay(state: SimulationState, enabled: boolean): void {
@@ -144,11 +151,12 @@ export function updateInversionDisplay(state: SimulationState, enabled: boolean)
 }
 
 export function updateSimulationClock(simulationMinutes: number): void {
+    const safeMinutes = Number.isFinite(simulationMinutes) ? simulationMinutes : 0;
     const totalMinutesInDay = 24 * 60;
-    const normalizedTime = simulationMinutes % totalMinutesInDay;
+    const normalizedTime = safeMinutes % totalMinutesInDay;
     const currentHour = Math.floor(normalizedTime / 60);
     const currentMinute = Math.floor(normalizedTime % 60);
-    const day = Math.floor(simulationMinutes / totalMinutesInDay) + 1;
+    const day = Math.floor(safeMinutes / totalMinutesInDay) + 1;
 
     getElement<HTMLElement>('simDay').textContent = `Day ${day}`;
     getElement<HTMLElement>('simTime').textContent = `${String(currentHour).padStart(2, '0')}:${String(
