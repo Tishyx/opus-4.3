@@ -66,6 +66,9 @@ export interface SimulationState {
   simulationTime: number;
   simulationSpeed: number;
   lastFrameTime: number;
+  selectedCellX: number | null;
+  selectedCellY: number | null;
+  selectedCellTooltipHtml: string | null;
 }
 
 export function createSimulationState(): SimulationState {
@@ -117,6 +120,9 @@ export function createSimulationState(): SimulationState {
     simulationTime: 6 * 60,
     simulationSpeed: 10,
     lastFrameTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+    selectedCellX: null,
+    selectedCellY: null,
+    selectedCellTooltipHtml: null,
   };
 }
 

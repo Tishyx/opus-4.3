@@ -31,7 +31,7 @@
 
     <div class="main-container">
         <div class="canvas-container">
-            <canvas id="canvas"></canvas>
+            <canvas id="canvas" tabindex="0" aria-label="Simulation grid. Click or use arrow keys to inspect cell data."></canvas>
             <div id="tooltip"></div>
         </div>
 
@@ -359,6 +359,11 @@
                                 <span class="stat-label">Avg. Snow Depth:</span>
                                 <span class="stat-value" id="avgSnowDepth">--</span>
                             </div>
+                        </div>
+
+                        <div class="stats selected-cell" id="cellInspector" aria-live="polite" aria-atomic="true">
+                            <h3 class="inspector-title">Selected Cell</h3>
+                            <p class="inspector-placeholder">Click or focus a cell to see detailed terrain and weather information.</p>
                         </div>
 
                         <div class="stats inversion" id="inversionInfo" style="display: none;">

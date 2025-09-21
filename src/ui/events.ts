@@ -1,4 +1,4 @@
-import { CELL_SIZE } from '../shared/constants';
+import { CELL_SIZE, GRID_SIZE } from '../shared/constants';
 import { LAND_TYPES, SOIL_TYPES } from '../shared/types';
 import { calculateContiguousAreas, calculateDistanceFields, calculateHillshade } from '../simulation/environment';
 import { initializeSoilMoisture } from '../simulation/soil';
@@ -32,6 +32,30 @@ const LAND_TYPE_LABELS = createTypeLabels(LAND_TYPES);
 const SOIL_TYPE_LABELS = createTypeLabels(SOIL_TYPES);
 const CLOUD_TYPE_LABELS = createTypeLabels(CLOUD_TYPES);
 const PRECIP_TYPE_LABELS = createTypeLabels(PRECIP_TYPES);
+
+type CellDetail = { label: string; value: string };
+
+const INSPECTOR_PLACEHOLDER_HTML = `
+    <h3 class="inspector-title">Selected Cell</h3>
+    <p class="inspector-placeholder">Click or focus a cell to see detailed terrain and weather information.</p>
+`.trim();
+
+const INSPECTOR_INVALIDATING_CHECKBOXES = new Set([
+    'enableAdvection',
+    'enableDiffusion',
+    'enableInversions',
+    'enableDownslope',
+    'enableClouds',
+    'showHeatmap',
+    'showSoilTypes',
+    'showHillshade',
+    'showFog',
+    'showWindFlow',
+    'showClouds',
+    'showPrecipitation',
+    'showHumidity',
+    'showSnowCover',
+]);
 
 function getLabel(map: Record<number, string>, value: number | undefined, fallback: string): string {
     if (value === undefined) return fallback;
@@ -82,13 +106,7 @@ function formatCloudHeights(base: number, top: number): string {
     return `${safeBase.toFixed(0)} - ${safeTop.toFixed(0)} m`;
 }
 
-function showTooltip(
-    tooltip: HTMLElement,
-    event: MouseEvent,
-    state: SimulationState,
-    x: number,
-    y: number
-): void {
+function collectCellDetails(state: SimulationState, x: number, y: number): CellDetail[] {
     const land = getLabel(LAND_TYPE_LABELS, state.landCover[y]?.[x], 'Unknown');
     const soil = getLabel(SOIL_TYPE_LABELS, state.soilType[y]?.[x], 'Unknown');
     const surface = describeSurface(state, x, y);
@@ -108,51 +126,129 @@ function showTooltip(
     const wind = state.windVectorField[y]?.[x];
     const windDirection = wind ? formatWindDirection(wind.x, wind.y) : null;
 
-    const lines: string[] = [];
-    lines.push(`<strong>Coords:</strong> ${x}, ${y}`);
-    lines.push(`<strong>Land:</strong> ${land}`);
-    lines.push(`<strong>Surface:</strong> ${surface}`);
-    lines.push(`<strong>Soil:</strong> ${soil}`);
-    lines.push(`<strong>Elevation:</strong> ${state.elevation[y][x].toFixed(0)} m`);
-    lines.push(`<strong>Air Temp:</strong> ${state.temperature[y][x].toFixed(1)}°C`);
-    lines.push(`<strong>Surface Temp:</strong> ${state.soilTemperature[y][x].toFixed(1)}°C`);
+    const details: CellDetail[] = [];
+    details.push({ label: 'Coords', value: `${x}, ${y}` });
+    details.push({ label: 'Land', value: land });
+    details.push({ label: 'Surface', value: surface });
+    details.push({ label: 'Soil', value: soil });
+    details.push({ label: 'Elevation', value: `${state.elevation[y][x].toFixed(0)} m` });
+    details.push({ label: 'Air Temp', value: `${state.temperature[y][x].toFixed(1)}°C` });
+    details.push({ label: 'Surface Temp', value: `${state.soilTemperature[y][x].toFixed(1)}°C` });
     if (dewPoint !== undefined) {
-        lines.push(`<strong>Dew Point:</strong> ${dewPoint.toFixed(1)}°C`);
+        details.push({ label: 'Dew Point', value: `${dewPoint.toFixed(1)}°C` });
     }
-    lines.push(`<strong>Humidity:</strong> ${formatPercentage(state.humidity[y][x])}`);
+    details.push({ label: 'Humidity', value: formatPercentage(state.humidity[y][x]) });
     if (soilMoisture !== undefined) {
-        lines.push(`<strong>Soil Moisture:</strong> ${formatPercentage(soilMoisture)}`);
+        details.push({ label: 'Soil Moisture', value: formatPercentage(soilMoisture) });
     }
     if (fogDensity !== undefined && fogDensity > 0) {
-        lines.push(`<strong>Fog Density:</strong> ${formatPercentage(fogDensity, 1)}`);
+        details.push({ label: 'Fog Density', value: formatPercentage(fogDensity, 1) });
     }
     if (wind) {
         const directionSuffix = windDirection ? ` (${windDirection})` : '';
-        lines.push(`<strong>Wind:</strong> ${wind.speed.toFixed(1)} km/h${directionSuffix}`);
+        details.push({ label: 'Wind', value: `${wind.speed.toFixed(1)} km/h${directionSuffix}` });
     }
     if (cloudCoverage !== undefined) {
-        lines.push(`<strong>Cloud Cover:</strong> ${formatPercentage(cloudCoverage)}`);
+        details.push({ label: 'Cloud Cover', value: formatPercentage(cloudCoverage) });
     }
     if (cloudBase !== undefined && cloudTop !== undefined) {
-        lines.push(`<strong>Cloud Height:</strong> ${formatCloudHeights(cloudBase, cloudTop)}`);
+        details.push({ label: 'Cloud Height', value: formatCloudHeights(cloudBase, cloudTop) });
     }
-    lines.push(`<strong>Cloud Type:</strong> ${cloudType}`);
+    details.push({ label: 'Cloud Type', value: cloudType });
     if (state.cloudOpticalDepth[y]?.[x] !== undefined) {
-        lines.push(
-            `<strong>Cloud Optical Depth:</strong> ${state.cloudOpticalDepth[y][x].toFixed(1)}`
-        );
+        details.push({
+            label: 'Cloud Optical Depth',
+            value: `${state.cloudOpticalDepth[y][x].toFixed(1)}`,
+        });
     }
     if (precipitation !== undefined) {
-        lines.push(
-            `<strong>Precipitation:</strong> ${precipitation.toFixed(2)} mm/hr (${precipitationType})`
-        );
+        details.push({
+            label: 'Precipitation',
+            value: `${precipitation.toFixed(2)} mm/hr (${precipitationType})`,
+        });
     }
-    lines.push(`<strong>Snow:</strong> ${state.snowDepth[y][x].toFixed(1)} cm`);
+    details.push({ label: 'Snow', value: `${state.snowDepth[y][x].toFixed(1)} cm` });
+
+    return details;
+}
+
+function renderTooltipContent(details: CellDetail[]): string {
+    return details
+        .map(detail => `<strong>${detail.label}:</strong> ${detail.value}`)
+        .join('<br>');
+}
+
+function renderInspectorContent(details: CellDetail[]): string {
+    const rows = details
+        .map(
+            detail =>
+                `<div class="inspector-row"><dt>${detail.label}</dt><dd>${detail.value}</dd></div>`
+        )
+        .join('');
+
+    return `
+        <h3 class="inspector-title">Selected Cell</h3>
+        <dl class="inspector-list">${rows}</dl>
+    `;
+}
+
+function applyInspectorContent(
+    inspector: HTMLElement | null,
+    details: CellDetail[] | null
+): void {
+    if (!inspector) return;
+
+    if (!details || details.length === 0) {
+        inspector.innerHTML = INSPECTOR_PLACEHOLDER_HTML;
+        inspector.classList.remove('has-selection');
+        return;
+    }
+
+    inspector.innerHTML = renderInspectorContent(details);
+    inspector.classList.add('has-selection');
+}
+
+function updateSelectedCell(
+    state: SimulationState,
+    x: number,
+    y: number,
+    inspector: HTMLElement | null
+): void {
+    const details = collectCellDetails(state, x, y);
+    const tooltipContent = renderTooltipContent(details);
+
+    state.selectedCellX = x;
+    state.selectedCellY = y;
+    state.selectedCellTooltipHtml = tooltipContent;
+
+    applyInspectorContent(inspector, details);
+}
+
+function clearSelectedCell(state: SimulationState, inspector: HTMLElement | null): void {
+    state.selectedCellX = null;
+    state.selectedCellY = null;
+    state.selectedCellTooltipHtml = null;
+    applyInspectorContent(inspector, null);
+}
+
+function showTooltip(
+    tooltip: HTMLElement,
+    event: MouseEvent,
+    state: SimulationState,
+    x: number,
+    y: number
+): void {
+    const details = collectCellDetails(state, x, y);
+    const content = renderTooltipContent(details);
 
     tooltip.style.display = 'block';
     tooltip.style.left = `${event.clientX + 15}px`;
     tooltip.style.top = `${event.clientY}px`;
-    tooltip.innerHTML = lines.join('<br>');
+    tooltip.innerHTML = content;
+
+    if (state.selectedCellX === x && state.selectedCellY === y) {
+        state.selectedCellTooltipHtml = content;
+    }
 }
 
 function hideTooltip(tooltip: HTMLElement): void {
@@ -205,7 +301,13 @@ function applyBrushEffects(state: SimulationState, x: number, y: number): boolea
     return requiresRecalculation;
 }
 
-function handleBrush(state: SimulationState, x: number, y: number, callbacks: SimulationEventCallbacks): void {
+function handleBrush(
+    state: SimulationState,
+    x: number,
+    y: number,
+    callbacks: SimulationEventCallbacks,
+    onStateUpdated: () => void
+): void {
     const requiresRecalculation = applyBrushEffects(state, x, y);
 
     if (requiresRecalculation) {
@@ -219,6 +321,7 @@ function handleBrush(state: SimulationState, x: number, y: number, callbacks: Si
     }
 
     callbacks.runSimulationFrame();
+    onStateUpdated();
 }
 
 function bindBrushButtons(state: SimulationState): void {
@@ -259,9 +362,20 @@ function bindBrushCategorySwitch(state: SimulationState): void {
     });
 }
 
-function bindControlSynchronizers(state: SimulationState, callbacks: SimulationEventCallbacks): void {
-    document.getElementById('month')?.addEventListener('change', callbacks.runSimulationFrame);
-    document.getElementById('windDirection')?.addEventListener('change', callbacks.runSimulationFrame);
+function bindControlSynchronizers(
+    state: SimulationState,
+    callbacks: SimulationEventCallbacks,
+    onDataLayerChanged: () => void,
+    onStateUpdated: () => void
+): void {
+    document.getElementById('month')?.addEventListener('change', () => {
+        callbacks.runSimulationFrame();
+        onStateUpdated();
+    });
+    document.getElementById('windDirection')?.addEventListener('change', () => {
+        callbacks.runSimulationFrame();
+        onStateUpdated();
+    });
 
     const heatmapPaletteSelect = document.getElementById('heatmapPalette') as HTMLSelectElement | null;
     const showHeatmapCheckbox = document.getElementById('showHeatmap') as HTMLInputElement | null;
@@ -276,6 +390,7 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
         const label = document.getElementById('windSpeedValue');
         if (label) label.textContent = value;
         callbacks.runSimulationFrame();
+        onStateUpdated();
     });
 
     document.getElementById('windGustiness')?.addEventListener('input', event => {
@@ -283,6 +398,7 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
         const label = document.getElementById('windGustinessValue');
         if (label) label.textContent = value;
         callbacks.runSimulationFrame();
+        onStateUpdated();
     });
 
     document.querySelectorAll('.controls input[type="checkbox"]').forEach(element => {
@@ -291,10 +407,17 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
             if (checkbox.id === 'showHeatmap') {
                 syncHeatmapPaletteState();
             }
+            const invalidates = INSPECTOR_INVALIDATING_CHECKBOXES.has(checkbox.id);
+
             if (checkbox.id.startsWith('show')) {
                 callbacks.redraw();
             } else {
                 callbacks.runSimulationFrame();
+            }
+            if (invalidates) {
+                onDataLayerChanged();
+            } else {
+                onStateUpdated();
             }
         });
     });
@@ -316,7 +439,11 @@ function bindControlSynchronizers(state: SimulationState, callbacks: SimulationE
     });
 }
 
-function bindSimulationControls(state: SimulationState, callbacks: SimulationEventCallbacks): void {
+function bindSimulationControls(
+    state: SimulationState,
+    callbacks: SimulationEventCallbacks,
+    onEnvironmentReset: () => void
+): void {
     const playPauseButton = document.getElementById('playPauseBtn') as HTMLButtonElement | null;
     playPauseButton?.addEventListener('click', () => {
         state.isSimulating = !state.isSimulating;
@@ -330,6 +457,7 @@ function bindSimulationControls(state: SimulationState, callbacks: SimulationEve
         state.isSimulating = false;
         resetPlayButton();
         state.simulationTime = 6 * 60;
+        onEnvironmentReset();
         callbacks.runSimulationFrame();
     });
 
@@ -337,6 +465,7 @@ function bindSimulationControls(state: SimulationState, callbacks: SimulationEve
         state.isSimulating = false;
         resetPlayButton();
         state.simulationTime = 6 * 60;
+        onEnvironmentReset();
         callbacks.initializeGrids();
     });
 
@@ -354,11 +483,29 @@ export function setupEventListeners(
     tooltip: HTMLElement,
     callbacks: SimulationEventCallbacks
 ): void {
+    const inspector = document.getElementById('cellInspector');
+    const resetSelectedCell = () => clearSelectedCell(state, inspector);
+    const refreshSelectedCell = () => {
+        if (state.selectedCellX === null || state.selectedCellY === null) {
+            return;
+        }
+
+        const x = state.selectedCellX;
+        const y = state.selectedCellY;
+        if (isInBounds(x, y)) {
+            updateSelectedCell(state, x, y, inspector);
+        } else {
+            resetSelectedCell();
+        }
+    };
+
+    applyInspectorContent(inspector, null);
+
     initializeControlReadouts();
     bindBrushButtons(state);
     bindBrushCategorySwitch(state);
-    bindControlSynchronizers(state, callbacks);
-    bindSimulationControls(state, callbacks);
+    bindControlSynchronizers(state, callbacks, resetSelectedCell, refreshSelectedCell);
+    bindSimulationControls(state, callbacks, resetSelectedCell);
 
     canvas.addEventListener('mousedown', event => {
         state.isDrawing = true;
@@ -367,8 +514,10 @@ export function setupEventListeners(
         const gridX = Math.floor((event.clientX - rect.left) / CELL_SIZE);
         const gridY = Math.floor((event.clientY - rect.top) / CELL_SIZE);
         if (isInBounds(gridX, gridY)) {
-            handleBrush(state, gridX, gridY, callbacks);
+            updateSelectedCell(state, gridX, gridY, inspector);
+            handleBrush(state, gridX, gridY, callbacks, refreshSelectedCell);
         }
+        canvas.focus();
         event.preventDefault();
     });
 
@@ -389,11 +538,44 @@ export function setupEventListeners(
         if (isInBounds(gridX, gridY)) {
             showTooltip(tooltip, event, state, gridX, gridY);
             if (state.isDrawing) {
-                handleBrush(state, gridX, gridY, callbacks);
+                handleBrush(state, gridX, gridY, callbacks, refreshSelectedCell);
             }
         } else {
             hideTooltip(tooltip);
         }
+    });
+
+    canvas.addEventListener('keydown', event => {
+        let deltaX = 0;
+        let deltaY = 0;
+        switch (event.key) {
+            case 'ArrowUp':
+                deltaY = -1;
+                break;
+            case 'ArrowDown':
+                deltaY = 1;
+                break;
+            case 'ArrowLeft':
+                deltaX = -1;
+                break;
+            case 'ArrowRight':
+                deltaX = 1;
+                break;
+            case 'Enter':
+            case ' ':
+                break;
+            default:
+                return;
+        }
+
+        event.preventDefault();
+
+        const currentX = state.selectedCellX ?? Math.floor(GRID_SIZE / 2);
+        const currentY = state.selectedCellY ?? Math.floor(GRID_SIZE / 2);
+        const nextX = clamp(currentX + deltaX, 0, GRID_SIZE - 1);
+        const nextY = clamp(currentY + deltaY, 0, GRID_SIZE - 1);
+
+        updateSelectedCell(state, nextX, nextY, inspector);
     });
 
     canvas.addEventListener('contextmenu', event => event.preventDefault());
