@@ -241,15 +241,17 @@ export function updateTimeOfDayControl(simulationMinutes: number): void {
     const label = document.getElementById('timeOfDayValue');
     const safeMinutes = Number.isFinite(simulationMinutes) ? simulationMinutes : 0;
     const normalizedTime = normalizeToDay(safeMinutes);
+    let displayMinutes = normalizedTime;
 
     if (slider) {
         const stepAligned = Math.round(normalizedTime / TIME_SLIDER_STEP_MINUTES) * TIME_SLIDER_STEP_MINUTES;
         const clamped = Math.min(Math.max(0, stepAligned), TOTAL_MINUTES_IN_DAY - 1);
         slider.value = clamped.toString();
+        displayMinutes = clamped;
     }
 
     if (label) {
-        label.textContent = formatTimeLabel(safeMinutes);
+        label.textContent = formatTimeLabel(displayMinutes);
     }
 }
 

@@ -405,13 +405,16 @@ export function calculateSimulationMetrics(state: SimulationState): SimulationMe
 
     const precipitationValues = state.precipitation.flat().filter(Number.isFinite);
     const totalPrecipitation =
-        precipitationValues.reduce((sum, value) => sum + value, 0) / totalCells;
+        precipitationValues.reduce((sum, value) => sum + value, 0) /
+        Math.max(1, precipitationValues.length);
 
     const cloudHeights = state.cloudTop.flat().filter(Number.isFinite);
     const maxCloudHeight = cloudHeights.length > 0 ? Math.max(...cloudHeights) : 0;
 
     const snowDepthValues = state.snowDepth.flat().filter(Number.isFinite);
-    const avgSnowDepth = snowDepthValues.reduce((sum, value) => sum + value, 0) / totalCells;
+    const avgSnowDepth =
+        snowDepthValues.reduce((sum, value) => sum + value, 0) /
+        Math.max(1, snowDepthValues.length);
 
     return {
         minTemperature,

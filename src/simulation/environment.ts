@@ -17,11 +17,11 @@ function clampGridIndex(value: number): number {
     return 0;
   }
 
-  const integerValue = Math.round(value);
-  if (integerValue <= 0) {
+  const integerValue = Math.floor(value);
+  if (integerValue < 0) {
     return 0;
   }
-  if (integerValue >= GRID_SIZE - 1) {
+  if (integerValue > GRID_SIZE - 1) {
     return GRID_SIZE - 1;
   }
   return integerValue;
@@ -57,11 +57,12 @@ function fractionToGridIndex(fraction: number): number {
 }
 
 function scaleByGrid(fraction: number, minimum = 1): number {
-  const safeMinimum = isFiniteNumber(minimum) ? Math.max(1, Math.round(minimum)) : 1;
-  const safeFraction = isFiniteNumber(fraction) ? fraction : 0;
-  const scaled = Math.round(GRID_SIZE * safeFraction);
-  const safeScaled = isFiniteNumber(scaled) ? scaled : 0;
-  return Math.max(safeMinimum, safeScaled);
+  const safeMinimum = isFiniteNumber(minimum) ? Math.max(1, Math.ceil(minimum)) : 1;
+  const finiteFraction = isFiniteNumber(fraction) ? fraction : 0;
+  const normalizedFraction = normalizeFraction(finiteFraction);
+  const scaled = Math.round(GRID_SIZE * normalizedFraction);
+  const clampedScaled = Math.min(GRID_SIZE, Math.max(0, scaled));
+  return Math.min(Math.max(safeMinimum, clampedScaled), GRID_SIZE);
 }
 
 function generatePerlinNoise(): number[][] {
