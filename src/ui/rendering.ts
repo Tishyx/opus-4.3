@@ -1,4 +1,4 @@
-import { CELL_SIZE, GRID_SIZE } from '../shared/constants';
+import { BASE_ELEVATION, CELL_SIZE, GRID_SIZE } from '../shared/constants';
 import { CLOUD_TYPES, type CloudType, PRECIP_TYPES } from '../simulation/weatherTypes';
 import { clamp, getLandColor } from '../simulation/utils';
 import type { SimulationState } from '../simulation/state';
@@ -118,6 +118,24 @@ type CloudAppearance = {
     lobeScale: number;
 };
 
+type RgbColor = readonly [number, number, number];
+
+type WindArrowAppearance = {
+    strokeStyle: string;
+    lineWidth: number;
+    lengthScale: number;
+};
+
+const WIND_ARROW_BASE_COLORS: {
+    default: RgbColor;
+    foehn: RgbColor;
+    katabatic: RgbColor;
+} = {
+    default: [224, 234, 248],
+    foehn: [255, 132, 120],
+    katabatic: [128, 176, 255],
+};
+
 const DEFAULT_CLOUD_APPEARANCE: CloudAppearance = {
     color: [255, 255, 255],
     softness: 0.75,
@@ -198,6 +216,55 @@ const CLOUD_APPEARANCE: Partial<Record<CloudType, CloudAppearance>> = {
         lobeScale: 1.2,
     },
 };
+
+function getTerrainFactors(state: SimulationState, x: number, y: number): {
+    altitudeFactor: number;
+    slopeFactor: number;
+} {
+    const elevation = state.elevation[y][x];
+    const leftElevation = x > 0 ? state.elevation[y][x - 1] : elevation;
+    const rightElevation = x < GRID_SIZE - 1 ? state.elevation[y][x + 1] : elevation;
+    const topElevation = y > 0 ? state.elevation[y - 1][x] : elevation;
+    const bottomElevation = y < GRID_SIZE - 1 ? state.elevation[y + 1][x] : elevation;
+
+    const gradientX = (rightElevation - leftElevation) / 2;
+    const gradientY = (bottomElevation - topElevation) / 2;
+    const slope = Math.sqrt(gradientX * gradientX + gradientY * gradientY);
+
+    const altitudeFactor = clamp((elevation - BASE_ELEVATION) / 600, 0, 1);
+    const slopeFactor = clamp(slope / 120, 0, 1);
+
+    return { altitudeFactor, slopeFactor };
+}
+
+function getWindBaseColor(state: SimulationState, x: number, y: number): RgbColor {
+    if (state.foehnEffect[y][x] > 0.5) return WIND_ARROW_BASE_COLORS.foehn;
+    if (state.downSlopeWinds[y][x] < -0.2) return WIND_ARROW_BASE_COLORS.katabatic;
+    return WIND_ARROW_BASE_COLORS.default;
+}
+
+function getWindArrowAppearance(
+    state: SimulationState,
+    x: number,
+    y: number,
+    baseColor: RgbColor
+): WindArrowAppearance {
+    const { altitudeFactor, slopeFactor } = getTerrainFactors(state, x, y);
+    const terrainFactor = Math.max(altitudeFactor, slopeFactor);
+
+    const brightness = 0.7 + (1 - terrainFactor) * 0.3;
+    const slopeHighlight = slopeFactor * 40;
+
+    const red = Math.round(clamp(baseColor[0] * brightness + slopeHighlight, 0, 255));
+    const green = Math.round(clamp(baseColor[1] * brightness + slopeHighlight, 0, 255));
+    const blue = Math.round(clamp(baseColor[2] * brightness + slopeHighlight, 0, 255));
+
+    return {
+        strokeStyle: `rgba(${red}, ${green}, ${blue}, ${0.8 + terrainFactor * 0.2})`,
+        lineWidth: 0.9 + terrainFactor * 1.4,
+        lengthScale: 0.85 + (1 - slopeFactor) * 0.15,
+    };
+}
 
 function getCloudAppearance(type: CloudType | undefined): CloudAppearance {
     if (type === undefined) return DEFAULT_CLOUD_APPEARANCE;
@@ -513,7 +580,6 @@ export function drawSimulation(
     }
 
     if (showWind) {
-        ctx.lineWidth = 1;
         for (let y = 0; y < GRID_SIZE; y += 4) {
             for (let x = 0; x < GRID_SIZE; x += 4) {
                 const wind = state.windVectorField[y][x];
@@ -522,27 +588,41 @@ export function drawSimulation(
                     const centerY = y * CELL_SIZE + CELL_SIZE * 2;
 
                     const angle = Math.atan2(wind.y, wind.x);
-                    const length = Math.min(CELL_SIZE * 2, wind.speed);
+                    const baseLength = Math.min(CELL_SIZE * 2, wind.speed);
 
-                    if (state.foehnEffect[y][x] > 0.5) ctx.strokeStyle = 'red';
-                    else if (state.downSlopeWinds[y][x] < -0.2) ctx.strokeStyle = 'blue';
-                    else ctx.strokeStyle = 'white';
+                    const baseColor = getWindBaseColor(state, x, y);
+                    const { strokeStyle, lineWidth, lengthScale } = getWindArrowAppearance(
+                        state,
+                        x,
+                        y,
+                        baseColor
+                    );
+
+                    const length = Math.max(6, baseLength * lengthScale);
+                    const headLength = Math.max(5, length * 0.35);
+                    const headAngle = 0.5;
+
+                    const tipX = centerX + Math.cos(angle) * length;
+                    const tipY = centerY + Math.sin(angle) * length;
+
+                    ctx.strokeStyle = strokeStyle;
+                    ctx.lineWidth = lineWidth;
 
                     ctx.beginPath();
                     ctx.moveTo(centerX, centerY);
-                    ctx.lineTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
+                    ctx.lineTo(tipX, tipY);
                     ctx.stroke();
 
                     ctx.beginPath();
-                    ctx.moveTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
+                    ctx.moveTo(tipX, tipY);
                     ctx.lineTo(
-                        centerX + Math.cos(angle - 0.5) * (length - 4),
-                        centerY + Math.sin(angle - 0.5) * (length - 4)
+                        tipX - Math.cos(angle - headAngle) * headLength,
+                        tipY - Math.sin(angle - headAngle) * headLength
                     );
-                    ctx.moveTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
+                    ctx.moveTo(tipX, tipY);
                     ctx.lineTo(
-                        centerX + Math.cos(angle + 0.5) * (length - 4),
-                        centerY + Math.sin(angle + 0.5) * (length - 4)
+                        tipX - Math.cos(angle + headAngle) * headLength,
+                        tipY - Math.sin(angle + headAngle) * headLength
                     );
                     ctx.stroke();
                 }
