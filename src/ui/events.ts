@@ -44,8 +44,8 @@ function getGridCoordinatesFromMouseEvent(
     }
 
     return {
-        x: Math.floor(canvasX / CELL_SIZE),
-        y: Math.floor(canvasY / CELL_SIZE),
+        x: clamp(Math.floor(canvasX / CELL_SIZE), 0, GRID_SIZE - 1),
+        y: clamp(Math.floor(canvasY / CELL_SIZE), 0, GRID_SIZE - 1),
     };
 }
 
@@ -291,6 +291,7 @@ function clearSelectedCell(state: SimulationState, inspector: HTMLElement | null
 }
 
 function showTooltip(
+    canvas: HTMLCanvasElement,
     tooltip: HTMLElement,
     event: MouseEvent,
     state: SimulationState,
@@ -301,8 +302,12 @@ function showTooltip(
     const content = renderTooltipContent(details);
 
     tooltip.style.display = 'block';
-    tooltip.style.left = `${event.clientX + 15}px`;
-    tooltip.style.top = `${event.clientY}px`;
+    const offsetParent = (tooltip.offsetParent as HTMLElement | null) ?? canvas.parentElement;
+    const parentRect = offsetParent?.getBoundingClientRect();
+    const left = parentRect ? event.clientX - parentRect.left : event.clientX;
+    const top = parentRect ? event.clientY - parentRect.top : event.clientY;
+    tooltip.style.left = `${left + 15}px`;
+    tooltip.style.top = `${top}px`;
     tooltip.innerHTML = content;
 
     if (state.selectedCellX === x && state.selectedCellY === y) {
@@ -563,7 +568,7 @@ function bindSimulationControls(
         resetPlayButton();
         state.simulationTime = 6 * 60;
         onEnvironmentReset();
-        callbacks.runSimulationFrame();
+        callbacks.initializeGrids();
     });
 
     document.getElementById('resetBtn')?.addEventListener('click', () => {
@@ -655,7 +660,7 @@ export function setupEventListeners(
         const coordinates = getGridCoordinatesFromMouseEvent(canvas, event);
 
         if (coordinates && isInBounds(coordinates.x, coordinates.y)) {
-            showTooltip(tooltip, event, state, coordinates.x, coordinates.y);
+            showTooltip(canvas, tooltip, event, state, coordinates.x, coordinates.y);
             if (state.isDrawing) {
                 handleBrush(state, coordinates.x, coordinates.y, callbacks, refreshSelectedCell);
             }

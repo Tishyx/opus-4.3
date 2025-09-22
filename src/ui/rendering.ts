@@ -431,7 +431,7 @@ export function drawSimulation(
         heatmapVariable,
     } = toggles;
 
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.clearRect(0, 0, GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE);
 
     const heatmapConfig = getHeatmapConfiguration(state, heatmapVariable);
     const heatmapGrid = heatmapConfig.grid;
