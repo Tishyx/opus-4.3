@@ -14,8 +14,17 @@ export type SimulationControls = {
 };
 
 const HEATMAP_PALETTE_OPTIONS = ['blue-red', 'green-yellow', 'purple-orange', 'teal-magenta'] as const;
+const HEATMAP_VARIABLE_OPTIONS = [
+    'airTemperature',
+    'soilTemperature',
+    'dewPoint',
+    'humidity',
+    'soilMoisture',
+    'snowDepth',
+] as const;
 
 export type HeatmapPalette = (typeof HEATMAP_PALETTE_OPTIONS)[number];
+export type HeatmapVariable = (typeof HEATMAP_VARIABLE_OPTIONS)[number];
 
 export type VisualizationToggles = {
     showSoil: boolean;
@@ -28,6 +37,7 @@ export type VisualizationToggles = {
     showSnow: boolean;
     showHumidity: boolean;
     heatmapPalette: HeatmapPalette;
+    heatmapVariable: HeatmapVariable;
 };
 
 function getElement<T extends HTMLElement>(id: string): T {
@@ -112,6 +122,18 @@ function readHeatmapPaletteValue(): HeatmapPalette {
     return fallback;
 }
 
+function readHeatmapVariableValue(): HeatmapVariable {
+    const select = getElement<HTMLSelectElement>('heatmapVariable');
+    const { value } = select;
+    if ((HEATMAP_VARIABLE_OPTIONS as readonly string[]).includes(value)) {
+        return value as HeatmapVariable;
+    }
+
+    const fallback = HEATMAP_VARIABLE_OPTIONS[0];
+    select.value = fallback;
+    return fallback;
+}
+
 function formatMetricValue(value: number, fractionDigits: number): string {
     if (!Number.isFinite(value)) {
         return '—';
@@ -145,6 +167,7 @@ export function readVisualizationToggles(): VisualizationToggles {
         showSnow: readCheckboxValue('showSnowCover'),
         showHumidity: readCheckboxValue('showHumidity'),
         heatmapPalette: readHeatmapPaletteValue(),
+        heatmapVariable: readHeatmapVariableValue(),
     };
 }
 

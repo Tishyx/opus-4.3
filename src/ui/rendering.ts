@@ -2,7 +2,7 @@ import { CELL_SIZE, GRID_SIZE } from '../shared/constants';
 import { PRECIP_TYPES } from '../simulation/weatherTypes';
 import { clamp, getLandColor } from '../simulation/utils';
 import type { SimulationState } from '../simulation/state';
-import type { HeatmapPalette, VisualizationToggles } from './controls';
+import type { HeatmapPalette, HeatmapVariable, VisualizationToggles } from './controls';
 
 type ColorStop = {
     value: number;
@@ -48,6 +48,19 @@ const HUMIDITY_PALETTE: ColorStop[] = [
     { value: 1, color: [2, 132, 199] },
 ];
 
+type HeatmapPaletteType = 'temperature' | 'humidity';
+
+type HeatmapConfiguration = {
+    grid: number[][];
+    fallbackMin: number;
+    fallbackMax: number;
+    palette: HeatmapPaletteType;
+    clampMin?: number;
+    clampMax?: number;
+    minSpan?: number;
+    fixedRange?: { min: number; max: number };
+};
+
 function interpolateColor(stops: ColorStop[], value: number): [number, number, number] {
     if (value <= stops[0].value) return stops[0].color;
     if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
@@ -68,24 +81,88 @@ function interpolateColor(stops: ColorStop[], value: number): [number, number, n
     return stops[stops.length - 1].color;
 }
 
+function getColorFromStops(
+    stops: ColorStop[],
+    value: number,
+    minValue: number,
+    maxValue: number,
+    fallbackMin: number,
+    fallbackMax: number
+): string {
+    const safeMin = Number.isFinite(minValue) ? minValue : fallbackMin;
+    const safeMax = Number.isFinite(maxValue) ? maxValue : fallbackMax;
+    const span = safeMax - safeMin;
+    const normalized = span > 1e-6 ? clamp((value - safeMin) / span, 0, 1) : 0.5;
+    const [r, g, b] = interpolateColor(stops, normalized);
+    return `rgba(${r}, ${g}, ${b}, 1)`;
+}
+
 function getTemperatureColor(
     temp: number,
     palette: HeatmapPalette,
     minTemp: number,
     maxTemp: number
 ): string {
-    const safeMin = Number.isFinite(minTemp) ? minTemp : -10;
-    const safeMax = Number.isFinite(maxTemp) ? maxTemp : 40;
-    const span = safeMax - safeMin;
-    const normalized = span > 1e-6 ? clamp((temp - safeMin) / span, 0, 1) : 0.5;
-    const [r, g, b] = interpolateColor(HEATMAP_PALETTES[palette], normalized);
-    return `rgba(${r}, ${g}, ${b}, 1)`;
+    return getColorFromStops(HEATMAP_PALETTES[palette], temp, minTemp, maxTemp, -10, 40);
 }
 
 function getHumidityColor(relativeHumidity: number): string {
-    const normalized = clamp(relativeHumidity, 0, 1);
-    const [r, g, b] = interpolateColor(HUMIDITY_PALETTE, normalized);
-    return `rgba(${r}, ${g}, ${b}, 1)`;
+    return getColorFromStops(HUMIDITY_PALETTE, relativeHumidity, 0, 1, 0, 1);
+}
+
+function getHeatmapConfiguration(
+    state: SimulationState,
+    variable: HeatmapVariable
+): HeatmapConfiguration {
+    switch (variable) {
+        case 'soilTemperature':
+            return {
+                grid: state.soilTemperature,
+                fallbackMin: -10,
+                fallbackMax: 45,
+                palette: 'temperature',
+            };
+        case 'dewPoint':
+            return {
+                grid: state.dewPoint,
+                fallbackMin: -20,
+                fallbackMax: 25,
+                palette: 'temperature',
+            };
+        case 'humidity':
+            return {
+                grid: state.humidity,
+                fallbackMin: 0,
+                fallbackMax: 1,
+                palette: 'humidity',
+                fixedRange: { min: 0, max: 1 },
+            };
+        case 'soilMoisture':
+            return {
+                grid: state.soilMoisture,
+                fallbackMin: 0,
+                fallbackMax: 1,
+                palette: 'humidity',
+                fixedRange: { min: 0, max: 1 },
+            };
+        case 'snowDepth':
+            return {
+                grid: state.snowDepth,
+                fallbackMin: 0,
+                fallbackMax: 50,
+                palette: 'temperature',
+                clampMin: 0,
+                minSpan: 5,
+            };
+        case 'airTemperature':
+        default:
+            return {
+                grid: state.temperature,
+                fallbackMin: -10,
+                fallbackMax: 40,
+                palette: 'temperature',
+            };
+    }
 }
 
 export function drawSimulation(
@@ -106,31 +183,70 @@ export function drawSimulation(
         showSnow,
         showHumidity,
         heatmapPalette,
+        heatmapVariable,
     } = toggles;
 
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-    let minTemperature = Number.POSITIVE_INFINITY;
-    let maxTemperature = Number.NEGATIVE_INFINITY;
+    const heatmapConfig = getHeatmapConfiguration(state, heatmapVariable);
+    const heatmapGrid = heatmapConfig.grid;
+    let minHeatmapValue = Number.POSITIVE_INFINITY;
+    let maxHeatmapValue = Number.NEGATIVE_INFINITY;
 
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-            const temperature = state.temperature[y][x];
-            if (temperature < minTemperature) minTemperature = temperature;
-            if (temperature > maxTemperature) maxTemperature = temperature;
+            const heatmapValue = heatmapGrid[y]?.[x];
+            if (Number.isFinite(heatmapValue)) {
+                if (heatmapValue < minHeatmapValue) minHeatmapValue = heatmapValue;
+                if (heatmapValue > maxHeatmapValue) maxHeatmapValue = heatmapValue;
+            }
 
             ctx.fillStyle = getLandColor(state, x, y, showSoil);
             ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
         }
     }
 
-    if (!Number.isFinite(minTemperature) || !Number.isFinite(maxTemperature)) {
-        minTemperature = -10;
-        maxTemperature = 40;
-    } else if (minTemperature === maxTemperature) {
-        const adjustment = Math.max(0.5, Math.abs(minTemperature) * 0.05);
-        minTemperature -= adjustment;
-        maxTemperature += adjustment;
+    if (heatmapConfig.fixedRange) {
+        minHeatmapValue = heatmapConfig.fixedRange.min;
+        maxHeatmapValue = heatmapConfig.fixedRange.max;
+    } else {
+        if (!Number.isFinite(minHeatmapValue) || !Number.isFinite(maxHeatmapValue)) {
+            minHeatmapValue = heatmapConfig.fallbackMin;
+            maxHeatmapValue = heatmapConfig.fallbackMax;
+        }
+
+        if (heatmapConfig.clampMin !== undefined) {
+            minHeatmapValue = Math.max(minHeatmapValue, heatmapConfig.clampMin);
+        }
+        if (heatmapConfig.clampMax !== undefined) {
+            maxHeatmapValue = Math.min(maxHeatmapValue, heatmapConfig.clampMax);
+        }
+
+        if (minHeatmapValue === maxHeatmapValue) {
+            const span =
+                heatmapConfig.minSpan ?? Math.max(0.5, Math.abs(minHeatmapValue) * 0.05);
+            const halfSpan = span / 2;
+            minHeatmapValue -= halfSpan;
+            maxHeatmapValue += halfSpan;
+        }
+
+        if (
+            heatmapConfig.minSpan !== undefined &&
+            maxHeatmapValue - minHeatmapValue < heatmapConfig.minSpan
+        ) {
+            maxHeatmapValue = minHeatmapValue + heatmapConfig.minSpan;
+        }
+
+        if (heatmapConfig.clampMin !== undefined && minHeatmapValue < heatmapConfig.clampMin) {
+            minHeatmapValue = heatmapConfig.clampMin;
+        }
+        if (heatmapConfig.clampMax !== undefined && maxHeatmapValue > heatmapConfig.clampMax) {
+            maxHeatmapValue = heatmapConfig.clampMax;
+        }
+
+        if (minHeatmapValue >= maxHeatmapValue) {
+            maxHeatmapValue = minHeatmapValue + 1;
+        }
     }
 
     if (showHillshade) {
@@ -144,13 +260,23 @@ export function drawSimulation(
     }
 
     if (showHeatmap) {
+        const paletteStops =
+            heatmapConfig.palette === 'humidity'
+                ? HUMIDITY_PALETTE
+                : HEATMAP_PALETTES[heatmapPalette];
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
-                const color = getTemperatureColor(
-                    state.temperature[y][x],
-                    heatmapPalette,
-                    minTemperature,
-                    maxTemperature
+                const rawValue = heatmapGrid[y]?.[x];
+                const safeValue = Number.isFinite(rawValue)
+                    ? (rawValue as number)
+                    : (minHeatmapValue + maxHeatmapValue) / 2;
+                const color = getColorFromStops(
+                    paletteStops,
+                    safeValue,
+                    minHeatmapValue,
+                    maxHeatmapValue,
+                    heatmapConfig.fallbackMin,
+                    heatmapConfig.fallbackMax
                 );
                 ctx.globalAlpha = 0.6;
                 ctx.fillStyle = color;

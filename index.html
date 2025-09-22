@@ -273,6 +273,17 @@
                             <label for="showHeatmap">Show Temperature Heatmap</label>
                         </div>
                         <div class="control-group">
+                            <label for="heatmapVariable">Heatmap Variable</label>
+                            <select id="heatmapVariable">
+                                <option value="airTemperature" selected>Air Temperature</option>
+                                <option value="soilTemperature">Soil Temperature</option>
+                                <option value="dewPoint">Dew Point</option>
+                                <option value="humidity">Humidity</option>
+                                <option value="soilMoisture">Soil Moisture</option>
+                                <option value="snowDepth">Snow Depth</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
                             <label for="heatmapPalette">Heatmap Palette</label>
                             <select id="heatmapPalette">
                                 <option value="blue-red" selected>Blue → Red (Blau → Rot)</option>
