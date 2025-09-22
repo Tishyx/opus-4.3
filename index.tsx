@@ -43,7 +43,7 @@ const ctx = canvas.getContext('2d');
 const tooltip = document.getElementById('tooltip') as HTMLElement;
 
 const state: SimulationState = createSimulationState();
-resizeCanvas(canvas);
+resizeCanvas(canvas, ctx);
 const SIM_MINUTES_PER_REAL_SECOND = 15; // At 1x speed, 1 real second = 15 sim minutes
 
 // ===== INITIALIZATION =====
@@ -221,5 +221,12 @@ const eventCallbacks: SimulationEventCallbacks = {
 };
 
 setupEventListeners(state, canvas, tooltip, eventCallbacks);
+
+const handleResize = () => {
+    resizeCanvas(canvas, ctx);
+    drawSimulation(ctx, state, readVisualizationToggles());
+};
+
+window.addEventListener('resize', handleResize);
 initializeGrids();
 requestAnimationFrame(simulationLoop); // Start the main loop

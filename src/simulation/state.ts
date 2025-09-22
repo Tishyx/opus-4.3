@@ -142,7 +142,30 @@ export function resetVectorField(field: VectorField): void {
   }
 }
 
-export function resizeCanvas(canvas: HTMLCanvasElement): void {
-  canvas.width = GRID_SIZE * CELL_SIZE;
-  canvas.height = GRID_SIZE * CELL_SIZE;
+export function resizeCanvas(
+  canvas: HTMLCanvasElement,
+  ctx?: CanvasRenderingContext2D | null,
+): void {
+  const devicePixelRatio =
+    typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio)
+      ? window.devicePixelRatio
+      : 1;
+  const baseWidth = GRID_SIZE * CELL_SIZE;
+  const baseHeight = GRID_SIZE * CELL_SIZE;
+  const cssWidth = canvas.clientWidth || baseWidth;
+  const cssHeight = canvas.clientHeight || baseHeight;
+
+  const targetWidth = Math.max(1, Math.round(cssWidth * devicePixelRatio));
+  const targetHeight = Math.max(1, Math.round(cssHeight * devicePixelRatio));
+
+  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+  }
+
+  if (ctx) {
+    const scaleX = targetWidth / baseWidth;
+    const scaleY = targetHeight / baseHeight;
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+  }
 }
