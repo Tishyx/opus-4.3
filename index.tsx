@@ -60,12 +60,23 @@ function runSimulation(simDeltaTimeMinutes: number): void {
         windSpeed,
         windDir,
         windGustiness,
+        baseTemperatureOffset,
+        humidityTarget,
+        seasonalIntensity,
+        seasonalShift,
         enableAdvection,
         enableDiffusion,
         enableInversions,
         enableDownslope,
         enableClouds,
     } = readSimulationControls();
+
+    const climateOverrides = {
+        baseTemperatureOffset,
+        humidityTarget,
+        seasonalIntensity,
+        seasonalShift,
+    };
 
     const totalMinutesInDay = 24 * 60;
     const normalizedTime = ((state.simulationTime % totalMinutesInDay) + totalMinutesInDay) % totalMinutesInDay;
@@ -76,7 +87,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     updateTimeOfDayControl(state.simulationTime);
 
     const timeOfDay = currentHour + currentMinute / 60;
-    const monthValue = toMonthValue(month);
+    const monthValue = toMonthValue(month) + seasonalShift;
     const daylightHours = getDaylightHoursFromMonthValue(monthValue);
     const sunriseHour = 12 - daylightHours / 2;
     const sunsetHour = sunriseHour + daylightHours;
@@ -114,6 +125,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
             windSpeed,
             windDir,
             timeFactor,
+            climate: climateOverrides,
         });
     } else {
         resetGrid(state.cloudCoverage, 0);
@@ -148,6 +160,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
         enableDiffusion,
         enableInversions,
         enableDownslope,
+        climate: climateOverrides,
     });
 
     const metrics = calculateSimulationMetrics(state);

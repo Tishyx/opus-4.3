@@ -186,3 +186,12 @@ export function describeSurface(state: SimulationState, x: number, y: number): s
 
   return getThermalProperties(state, x, y).name;
 }
+
+export function computeDewPoint(temperature: number, relativeHumidity: number): number {
+  const safeTemperature = Number.isFinite(temperature) ? temperature : 0;
+  const safeHumidity = clamp(relativeHumidity, 0.01, 1);
+  const a = 17.27;
+  const b = 237.7;
+  const gamma = Math.log(safeHumidity) + (a * safeTemperature) / (b + safeTemperature);
+  return (b * gamma) / (a - gamma);
+}

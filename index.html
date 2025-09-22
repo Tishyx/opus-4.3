@@ -227,6 +227,35 @@
                         </div>
 
                         <div class="control-group">
+                            <label>
+                                Seasonal Intensity: <span class="range-value" id="seasonalIntensityValue">100</span>%
+                            </label>
+                            <input type="range" id="seasonalIntensity" min="0" max="200" value="100" step="5">
+                        </div>
+
+                        <div class="control-group">
+                            <label>
+                                Seasonal Phase Shift: <span class="range-value" id="seasonalShiftValue">0</span> mo
+                            </label>
+                            <input type="range" id="seasonalShift" min="-3" max="3" value="0" step="0.25">
+                        </div>
+
+                        <div class="control-group">
+                            <label>
+                                Base Temperature Offset:
+                                <span class="range-value" id="baseTemperatureOffsetValue">0.0</span>°C
+                            </label>
+                            <input type="range" id="baseTemperatureOffset" min="-20" max="20" value="0" step="0.5">
+                        </div>
+
+                        <div class="control-group">
+                            <label>
+                                Humidity Target: <span class="range-value" id="humidityTargetValue">60</span>%
+                            </label>
+                            <input type="range" id="humidityTarget" min="10" max="100" value="60" step="1">
+                        </div>
+
+                        <div class="control-group">
                             <label>Wind Direction</label>
                             <select id="windDirection">
                                 <option value="0" selected>North → South (↓)</option>
