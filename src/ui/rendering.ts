@@ -1,5 +1,5 @@
 import { CELL_SIZE, GRID_SIZE } from '../shared/constants';
-import { PRECIP_TYPES } from '../simulation/weatherTypes';
+import { CLOUD_TYPES, type CloudType, PRECIP_TYPES } from '../simulation/weatherTypes';
 import { clamp, getLandColor } from '../simulation/utils';
 import type { SimulationState } from '../simulation/state';
 import type { HeatmapPalette, HeatmapVariable, VisualizationToggles } from './controls';
@@ -108,6 +108,184 @@ function getTemperatureColor(
 
 function getHumidityColor(relativeHumidity: number): string {
     return getColorFromStops(HUMIDITY_PALETTE, relativeHumidity, 0, 1, 0, 1);
+}
+
+type CloudAppearance = {
+    color: [number, number, number];
+    softness: number;
+    verticalStretch: number;
+    maxOpacity: number;
+    lobeScale: number;
+};
+
+const DEFAULT_CLOUD_APPEARANCE: CloudAppearance = {
+    color: [255, 255, 255],
+    softness: 0.75,
+    verticalStretch: 0.7,
+    maxOpacity: 0.82,
+    lobeScale: 1,
+};
+
+const CLOUD_APPEARANCE: Partial<Record<CloudType, CloudAppearance>> = {
+    [CLOUD_TYPES.CUMULUS]: {
+        color: [255, 255, 255],
+        softness: 0.7,
+        verticalStretch: 0.8,
+        maxOpacity: 0.88,
+        lobeScale: 1.1,
+    },
+    [CLOUD_TYPES.CUMULONIMBUS]: {
+        color: [232, 235, 245],
+        softness: 0.55,
+        verticalStretch: 1.15,
+        maxOpacity: 0.92,
+        lobeScale: 1.35,
+    },
+    [CLOUD_TYPES.STRATUS]: {
+        color: [240, 240, 242],
+        softness: 0.85,
+        verticalStretch: 0.55,
+        maxOpacity: 0.75,
+        lobeScale: 0.9,
+    },
+    [CLOUD_TYPES.STRATOCUMULUS]: {
+        color: [245, 246, 248],
+        softness: 0.78,
+        verticalStretch: 0.65,
+        maxOpacity: 0.82,
+        lobeScale: 1.05,
+    },
+    [CLOUD_TYPES.NIMBOSTRATUS]: {
+        color: [220, 223, 233],
+        softness: 0.65,
+        verticalStretch: 0.8,
+        maxOpacity: 0.9,
+        lobeScale: 1.25,
+    },
+    [CLOUD_TYPES.CIRRUS]: {
+        color: [248, 250, 255],
+        softness: 0.92,
+        verticalStretch: 0.45,
+        maxOpacity: 0.6,
+        lobeScale: 0.75,
+    },
+    [CLOUD_TYPES.CIRROSTRATUS]: {
+        color: [246, 248, 255],
+        softness: 0.9,
+        verticalStretch: 0.5,
+        maxOpacity: 0.65,
+        lobeScale: 0.8,
+    },
+    [CLOUD_TYPES.ALTOSTRATUS]: {
+        color: [238, 240, 246],
+        softness: 0.8,
+        verticalStretch: 0.65,
+        maxOpacity: 0.78,
+        lobeScale: 1,
+    },
+    [CLOUD_TYPES.ALTOCUMULUS]: {
+        color: [244, 246, 250],
+        softness: 0.82,
+        verticalStretch: 0.6,
+        maxOpacity: 0.7,
+        lobeScale: 0.95,
+    },
+    [CLOUD_TYPES.OROGRAPHIC]: {
+        color: [236, 239, 247],
+        softness: 0.72,
+        verticalStretch: 0.9,
+        maxOpacity: 0.86,
+        lobeScale: 1.2,
+    },
+};
+
+function getCloudAppearance(type: CloudType | undefined): CloudAppearance {
+    if (type === undefined) return DEFAULT_CLOUD_APPEARANCE;
+    return CLOUD_APPEARANCE[type] ?? DEFAULT_CLOUD_APPEARANCE;
+}
+
+function hashCoords(x: number, y: number, seed: number): number {
+    let h = Math.imul(x + 1, 374761393) ^ Math.imul(y + 1, 668265263) ^ seed;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967295;
+}
+
+function drawCloudLobe(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    centerY: number,
+    radiusX: number,
+    radiusY: number,
+    color: [number, number, number],
+    opacity: number,
+    softness: number
+): void {
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.scale(radiusX, radiusY);
+
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    const innerStop = clamp(0.35 + softness * 0.35, 0.35, 0.85);
+    gradient.addColorStop(0, `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${opacity})`);
+    gradient.addColorStop(innerStop, `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${opacity * 0.65})`);
+    gradient.addColorStop(1, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0)`);
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawCloudCell(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    coverage: number,
+    cloudType: CloudType,
+    opticalDepth: number
+): void {
+    const appearance = getCloudAppearance(cloudType);
+    const density = clamp(coverage * 0.85 + clamp(opticalDepth / 8, 0, 0.4), 0.15, appearance.maxOpacity);
+
+    const centerX = x * CELL_SIZE + CELL_SIZE / 2;
+    const centerY = y * CELL_SIZE + CELL_SIZE / 2;
+    const lobeCount = Math.max(2, Math.round(2 + coverage * 3));
+
+    for (let i = 0; i < lobeCount; i++) {
+        const offsetSeed = i * 53;
+        const angle = hashCoords(x, y, offsetSeed) * Math.PI * 2;
+        const distanceFactor = 0.15 + hashCoords(x, y, offsetSeed + 13) * 0.55;
+        const sizeJitter = 0.65 + hashCoords(x, y, offsetSeed + 29) * 0.5;
+        const aspectJitter = 0.75 + hashCoords(x, y, offsetSeed + 41) * 0.35;
+
+        const radiusBase = (CELL_SIZE / 2) * (0.8 + coverage * appearance.lobeScale) * sizeJitter;
+        const radiusX = clamp(radiusBase, CELL_SIZE * 0.25, CELL_SIZE * 1.5);
+        const radiusY = clamp(radiusBase * appearance.verticalStretch * aspectJitter, CELL_SIZE * 0.18, CELL_SIZE * 1.2);
+
+        const offsetMagnitude = CELL_SIZE * distanceFactor * (0.4 + coverage * 0.6);
+        const offsetX = Math.cos(angle) * offsetMagnitude;
+        const offsetY = Math.sin(angle) * offsetMagnitude * (0.5 + appearance.verticalStretch * 0.5);
+
+        const lobeOpacity = clamp(density * (0.85 + hashCoords(x, y, offsetSeed + 7) * 0.3), 0.08, appearance.maxOpacity);
+        drawCloudLobe(ctx, centerX + offsetX, centerY + offsetY, radiusX, radiusY, appearance.color, lobeOpacity, appearance.softness);
+    }
+
+    if (coverage > 0.65 && appearance.maxOpacity > 0.8) {
+        const shadowOpacity = clamp(density * 0.4, 0.05, 0.4);
+        const shadowRadius = CELL_SIZE * (0.45 + coverage * 0.6);
+        drawCloudLobe(
+            ctx,
+            centerX,
+            centerY + CELL_SIZE * 0.1,
+            shadowRadius,
+            shadowRadius * appearance.verticalStretch * 0.9,
+            [210, 214, 223],
+            shadowOpacity,
+            clamp(appearance.softness * 0.6, 0.3, 0.8)
+        );
+    }
 }
 
 function getHeatmapConfiguration(
@@ -306,8 +484,14 @@ export function drawSimulation(
                 ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }
             if (showClouds && state.cloudCoverage[y][x] > 0.1) {
-                ctx.fillStyle = `rgba(255, 255, 255, ${clamp(state.cloudCoverage[y][x], 0, 0.8)})`;
-                ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                drawCloudCell(
+                    ctx,
+                    x,
+                    y,
+                    state.cloudCoverage[y][x],
+                    state.cloudType[y][x] ?? CLOUD_TYPES.NONE,
+                    state.cloudOpticalDepth[y][x]
+                );
             }
             if (showFog && state.fogDensity[y][x] > 0.1) {
                 ctx.fillStyle = `rgba(200, 200, 200, ${clamp(state.fogDensity[y][x], 0, 0.7)})`;
