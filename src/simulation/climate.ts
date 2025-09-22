@@ -20,7 +20,7 @@ export function blendHumidityTowardsTarget(
   blendFactor: number,
 ): number {
   const safeCurrent = clamp(currentHumidity, 0, 1);
-  const safeTarget = clamp(targetHumidity, 0.01, 1);
+  const safeTarget = clamp(targetHumidity, 0, 1);
   const safeBlend = clamp(blendFactor, 0, 1);
   return safeCurrent + (safeTarget - safeCurrent) * safeBlend;
 }
