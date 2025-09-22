@@ -4,7 +4,14 @@ import { calculateContiguousAreas, calculateDistanceFields, calculateHillshade }
 import { initializeSoilMoisture } from '../simulation/soil';
 import type { SimulationState } from '../simulation/state';
 import { clamp, describeSurface, distance, isInBounds, resolveLandType, resolveSoilType } from '../simulation/utils';
-import { initializeControlReadouts, resetPlayButton, updatePlayButton, updateTimeOfDayControl } from './controls';
+import {
+    initializeControlReadouts,
+    readVisualizationToggles,
+    resetPlayButton,
+    updatePlayButton,
+    updateTimeOfDayControl,
+} from './controls';
+import type { HeatmapVariable } from './controls';
 import { CLOUD_TYPES, PRECIP_TYPES } from '../simulation/weatherTypes';
 
 export type SimulationEventCallbacks = {
@@ -21,6 +28,10 @@ function toTitleCase(identifier: string): string {
         .filter(Boolean)
         .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
         .join(' ');
+}
+
+function annotateHeatmapLabel(label: string, variable: HeatmapVariable, target: HeatmapVariable): string {
+    return variable === target ? `${label} (Heatmap)` : label;
 }
 
 function createTypeLabels<T extends Record<string, number>>(types: T): Record<number, string> {
@@ -126,6 +137,7 @@ function collectCellDetails(state: SimulationState, x: number, y: number): CellD
     const precipitation = state.precipitation[y]?.[x];
     const wind = state.windVectorField[y]?.[x];
     const windDirection = wind ? formatWindDirection(wind.x, wind.y) : null;
+    const { heatmapVariable } = readVisualizationToggles();
 
     const details: CellDetail[] = [];
     details.push({ label: 'Coords', value: `${x}, ${y}` });
@@ -133,14 +145,29 @@ function collectCellDetails(state: SimulationState, x: number, y: number): CellD
     details.push({ label: 'Surface', value: surface });
     details.push({ label: 'Soil', value: soil });
     details.push({ label: 'Elevation', value: `${state.elevation[y][x].toFixed(0)} m` });
-    details.push({ label: 'Air Temp', value: `${state.temperature[y][x].toFixed(1)}°C` });
-    details.push({ label: 'Surface Temp', value: `${state.soilTemperature[y][x].toFixed(1)}°C` });
+    details.push({
+        label: annotateHeatmapLabel('Air Temp', heatmapVariable, 'airTemperature'),
+        value: `${state.temperature[y][x].toFixed(1)}°C`,
+    });
+    details.push({
+        label: annotateHeatmapLabel('Surface Temp', heatmapVariable, 'soilTemperature'),
+        value: `${state.soilTemperature[y][x].toFixed(1)}°C`,
+    });
     if (dewPoint !== undefined) {
-        details.push({ label: 'Dew Point', value: `${dewPoint.toFixed(1)}°C` });
+        details.push({
+            label: annotateHeatmapLabel('Dew Point', heatmapVariable, 'dewPoint'),
+            value: `${dewPoint.toFixed(1)}°C`,
+        });
     }
-    details.push({ label: 'Humidity', value: formatPercentage(state.humidity[y][x]) });
+    details.push({
+        label: annotateHeatmapLabel('Humidity', heatmapVariable, 'humidity'),
+        value: formatPercentage(state.humidity[y][x]),
+    });
     if (soilMoisture !== undefined) {
-        details.push({ label: 'Soil Moisture', value: formatPercentage(soilMoisture) });
+        details.push({
+            label: annotateHeatmapLabel('Soil Moisture', heatmapVariable, 'soilMoisture'),
+            value: formatPercentage(soilMoisture),
+        });
     }
     if (fogDensity !== undefined && fogDensity > 0) {
         details.push({ label: 'Fog Density', value: formatPercentage(fogDensity, 1) });
@@ -168,7 +195,10 @@ function collectCellDetails(state: SimulationState, x: number, y: number): CellD
             value: `${precipitation.toFixed(2)} mm/hr (${precipitationType})`,
         });
     }
-    details.push({ label: 'Snow', value: `${state.snowDepth[y][x].toFixed(1)} cm` });
+    details.push({
+        label: annotateHeatmapLabel('Snow', heatmapVariable, 'snowDepth'),
+        value: `${state.snowDepth[y][x].toFixed(1)} cm`,
+    });
 
     return details;
 }
@@ -379,12 +409,15 @@ function bindControlSynchronizers(
     });
 
     const heatmapPaletteSelect = document.getElementById('heatmapPalette') as HTMLSelectElement | null;
+    const heatmapVariableSelect = document.getElementById('heatmapVariable') as HTMLSelectElement | null;
     const showHeatmapCheckbox = document.getElementById('showHeatmap') as HTMLInputElement | null;
-    const syncHeatmapPaletteState = () => {
-        if (!heatmapPaletteSelect || !showHeatmapCheckbox) return;
-        heatmapPaletteSelect.disabled = !showHeatmapCheckbox.checked;
+    const syncHeatmapControlsState = () => {
+        if (!showHeatmapCheckbox) return;
+        const disabled = !showHeatmapCheckbox.checked;
+        if (heatmapPaletteSelect) heatmapPaletteSelect.disabled = disabled;
+        if (heatmapVariableSelect) heatmapVariableSelect.disabled = disabled;
     };
-    syncHeatmapPaletteState();
+    syncHeatmapControlsState();
 
     document.getElementById('windSpeed')?.addEventListener('input', event => {
         const value = (event.target as HTMLInputElement).value;
@@ -406,7 +439,7 @@ function bindControlSynchronizers(
         element.addEventListener('change', () => {
             const checkbox = element as HTMLInputElement;
             if (checkbox.id === 'showHeatmap') {
-                syncHeatmapPaletteState();
+                syncHeatmapControlsState();
             }
             const invalidates = INSPECTOR_INVALIDATING_CHECKBOXES.has(checkbox.id);
 
@@ -424,6 +457,10 @@ function bindControlSynchronizers(
     });
 
     document.getElementById('heatmapPalette')?.addEventListener('change', callbacks.redraw);
+    heatmapVariableSelect?.addEventListener('change', () => {
+        callbacks.redraw();
+        onStateUpdated();
+    });
 
     document.getElementById('brushSize')?.addEventListener('input', event => {
         const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
