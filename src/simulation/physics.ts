@@ -18,6 +18,7 @@ import { ClimateOverrides, DEFAULT_CLIMATE_OVERRIDES, blendHumidityTowardsTarget
 export type ThermodynamicsOptions = {
     month: number;
     hour: number;
+    timeOfDay: number;
     sunAltitude: number;
     timeFactor: number;
     enableDiffusion: boolean;
@@ -163,6 +164,7 @@ function calculatePhysicsRates(
     state: SimulationState,
     month: number,
     hour: number,
+    timeOfDay: number,
     enableInversions: boolean,
     enableDownslope: boolean,
     climate: ClimateOverrides
@@ -227,7 +229,8 @@ function calculatePhysicsRates(
                 const localWindSpeed = state.windVectorField[y][x].speed;
                 if (localWindSpeed > 5) {
                     const mixing = Math.min(WIND_MIXING_MAX, localWindSpeed / WIND_MIXING_DIVISOR);
-                    const baseTemp = calculateBaseTemperature(month, hour, climate);
+                    const diurnalHour = Number.isFinite(timeOfDay) ? timeOfDay : hour;
+                    const baseTemp = calculateBaseTemperature(month, diurnalHour, climate);
                     const mixingRate = (baseTemp - state.temperature[y][x]) * mixing;
                     state.inversionAndDownslopeRate[y][x] += mixingRate;
                 }
@@ -240,6 +243,7 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
     const {
         month,
         hour,
+        timeOfDay,
         sunAltitude,
         timeFactor,
         enableDiffusion,
@@ -248,7 +252,17 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
         climate: climateOverrides = DEFAULT_CLIMATE_OVERRIDES,
     } = options;
 
-    calculatePhysicsRates(state, month, hour, enableInversions, enableDownslope, climateOverrides);
+    const diurnalHour = Number.isFinite(timeOfDay) ? timeOfDay : hour;
+
+    calculatePhysicsRates(
+        state,
+        month,
+        hour,
+        diurnalHour,
+        enableInversions,
+        enableDownslope,
+        climateOverrides
+    );
 
     let newTemperature: number[][] = state.temperature.map(row => [...row]);
     let newSoilTemperature: number[][] = state.soilTemperature.map(row => [...row]);
@@ -256,6 +270,7 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
     if (timeFactor > 0) {
         const humidityBlend = Math.min(Math.max(timeFactor * HUMIDITY_TARGET_RELAXATION, 0), 1);
         const targetHumidity = clamp(climateOverrides.humidityTarget, 0.01, 1);
+        const baseTemperature = calculateBaseTemperature(month, diurnalHour, climateOverrides);
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
                 const prevAirTemp = state.temperature[y][x];
@@ -336,7 +351,8 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
                     airEnergyBalance += dryHeating;
                 }
 
-                const stdTempAtElev = 15 - ((state.elevation[y][x] - BASE_ELEVATION) / 100) * LAPSE_RATE;
+                const elevationDelta = (state.elevation[y][x] - BASE_ELEVATION) / 100;
+                const stdTempAtElev = baseTemperature - elevationDelta * LAPSE_RATE;
                 airEnergyBalance += (stdTempAtElev - prevAirTemp) * BASE_TURBULENCE_RATE;
 
                 airEnergyBalance = clamp(

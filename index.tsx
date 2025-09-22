@@ -155,6 +155,7 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     updateThermodynamics(state, {
         month,
         hour: currentHour,
+        timeOfDay,
         sunAltitude,
         timeFactor,
         enableDiffusion,
