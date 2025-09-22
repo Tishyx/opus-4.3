@@ -84,8 +84,19 @@ function isValidSoilType(value: number): value is SoilType {
   return SOIL_TYPE_VALUES.has(value as SoilType);
 }
 
+const toFiniteOr = (value: number, fallback: number): number =>
+  Number.isFinite(value) ? value : fallback;
+
 export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+  const finiteValue = toFiniteOr(value, 0);
+  let lower = toFiniteOr(min, Number.NEGATIVE_INFINITY);
+  let upper = toFiniteOr(max, Number.POSITIVE_INFINITY);
+
+  if (lower > upper) {
+    [lower, upper] = [upper, lower];
+  }
+
+  return Math.min(Math.max(finiteValue, lower), upper);
 }
 
 export function computeBoundaryDamping(x: number, y: number): number {
@@ -101,7 +112,12 @@ export function computeBoundaryDamping(x: number, y: number): number {
 }
 
 export function distance(x1: number, y1: number, x2: number, y2: number): number {
-  return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  const safeX1 = toFiniteOr(x1, 0);
+  const safeY1 = toFiniteOr(y1, 0);
+  const safeX2 = toFiniteOr(x2, 0);
+  const safeY2 = toFiniteOr(y2, 0);
+
+  return Math.hypot(safeX2 - safeX1, safeY2 - safeY1);
 }
 
 export function isInBounds(x: number, y: number): boolean {
@@ -188,8 +204,14 @@ export function describeSurface(state: SimulationState, x: number, y: number): s
 }
 
 export function computeDewPoint(temperature: number, relativeHumidity: number): number {
-  const safeTemperature = Number.isFinite(temperature) ? temperature : 0;
-  const safeHumidity = clamp(relativeHumidity, 0.01, 1);
+  const safeTemperature = toFiniteOr(temperature, 0);
+  let humidity = toFiniteOr(relativeHumidity, 0);
+
+  if (humidity > 1) {
+    humidity /= 100;
+  }
+
+  const safeHumidity = clamp(humidity, 0.01, 1);
   const a = 17.27;
   const b = 237.7;
   const gamma = Math.log(safeHumidity) + (a * safeTemperature) / (b + safeTemperature);
