@@ -6,6 +6,10 @@ export type SimulationControls = {
     windSpeed: number;
     windDir: number;
     windGustiness: number;
+    baseTemperatureOffset: number;
+    humidityTarget: number;
+    seasonalIntensity: number;
+    seasonalShift: number;
     enableAdvection: boolean;
     enableDiffusion: boolean;
     enableInversions: boolean;
@@ -142,11 +146,26 @@ function formatMetricValue(value: number, fractionDigits: number): string {
 }
 
 export function readSimulationControls(): SimulationControls {
+    const humidityPercent = readNumericInputValue('humidityTarget');
+    const humidityTarget = Number.isFinite(humidityPercent)
+        ? Math.min(Math.max(humidityPercent / 100, 0), 1)
+        : 0.6;
+    const seasonalPercent = readNumericInputValue('seasonalIntensity');
+    const seasonalIntensity = Number.isFinite(seasonalPercent)
+        ? Math.max(seasonalPercent / 100, 0)
+        : 1;
+    const baseTemperatureOffset = readNumericInputValue('baseTemperatureOffset');
+    const seasonalShift = readNumericInputValue('seasonalShift');
+
     return {
         month: readNumericSelectValue('month'),
         windSpeed: readNumericInputValue('windSpeed'),
         windDir: readNumericSelectValue('windDirection'),
         windGustiness: readNumericInputValue('windGustiness'),
+        baseTemperatureOffset,
+        humidityTarget,
+        seasonalIntensity,
+        seasonalShift,
         enableAdvection: readCheckboxValue('enableAdvection'),
         enableDiffusion: readCheckboxValue('enableDiffusion'),
         enableInversions: readCheckboxValue('enableInversions'),

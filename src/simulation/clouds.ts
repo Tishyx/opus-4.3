@@ -2,8 +2,9 @@ import { CELL_SIZE, GRID_SIZE } from '../shared/constants';
 import { LAND_TYPES, SOIL_TYPES } from '../shared/types';
 import type { SimulationState } from './state';
 import { CLOUD_TYPES, type CloudType, PRECIP_TYPES, type PrecipitationType } from './weatherTypes';
-import { clamp, getThermalProperties, isInBounds } from './utils';
+import { clamp, computeDewPoint, getThermalProperties, isInBounds } from './utils';
 import { calculateBaseTemperature } from './temperature';
+import { ClimateOverrides, DEFAULT_CLIMATE_OVERRIDES } from './climate';
 
 type ConvectiveClouds = {
   development: number;
@@ -209,9 +210,10 @@ function calculateConvectiveClouds(
   x: number,
   y: number,
   month: number,
-  hour: number
+  hour: number,
+  climate: ClimateOverrides,
 ): ConvectiveClouds {
-  const baseTemp = calculateBaseTemperature(month, hour);
+  const baseTemp = calculateBaseTemperature(month, hour, climate);
   let thermal = 0;
 
   if (hour >= 10 && hour <= 17) {
@@ -325,11 +327,7 @@ function updateHumidity(
   const humidityChange = ((evaporationRate - precipReductionRate) * timeFactor) / 100;
   state.humidity[y][x] = clamp(state.humidity[y][x] + humidityChange, 0.01, 1);
 
-  const a = 17.27;
-  const b = 237.7;
-  const relHumidity = state.humidity[y][x];
-  const gamma = Math.log(relHumidity) + (a * state.temperature[y][x]) / (b + state.temperature[y][x]);
-  state.dewPoint[y][x] = (b * gamma) / (a - gamma);
+  state.dewPoint[y][x] = computeDewPoint(state.temperature[y][x], state.humidity[y][x]);
 }
 
 function smoothCloudFields(state: SimulationState): void {
@@ -356,9 +354,16 @@ function smoothCloudFields(state: SimulationState): void {
 
 export function updateCloudDynamics(
   state: SimulationState,
-  params: { month: number; hour: number; windSpeed: number; windDir: number; timeFactor: number }
+  params: {
+    month: number;
+    hour: number;
+    windSpeed: number;
+    windDir: number;
+    timeFactor: number;
+    climate?: ClimateOverrides;
+  }
 ): void {
-  const { month, hour, windSpeed, windDir, timeFactor } = params;
+  const { month, hour, windSpeed, windDir, timeFactor, climate = DEFAULT_CLIMATE_OVERRIDES } = params;
 
   if (timeFactor <= 0) {
     return;
@@ -371,7 +376,7 @@ export function updateCloudDynamics(
       const orographicFormationRate =
         calculateOrographicClouds(state, x, y, windSpeed, windDir) * 2;
 
-      const convective = calculateConvectiveClouds(state, x, y, month, hour);
+      const convective = calculateConvectiveClouds(state, x, y, month, hour, climate);
       const convectiveFormationRate = convective.development * 2;
 
       state.convectiveEnergy[y][x] = convective.cape;

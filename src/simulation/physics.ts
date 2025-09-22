@@ -12,7 +12,8 @@ import type { SimulationState } from './state';
 import { calculateBaseTemperature } from './temperature';
 import { calculateCloudRadiation } from './clouds';
 import { calculateSnowEffects, updateSnowCover } from './snow';
-import { clamp, getThermalProperties, isInBounds } from './utils';
+import { clamp, computeDewPoint, getThermalProperties, isInBounds } from './utils';
+import { ClimateOverrides, DEFAULT_CLIMATE_OVERRIDES, blendHumidityTowardsTarget } from './climate';
 
 export type ThermodynamicsOptions = {
     month: number;
@@ -22,6 +23,7 @@ export type ThermodynamicsOptions = {
     enableDiffusion: boolean;
     enableInversions: boolean;
     enableDownslope: boolean;
+    climate?: ClimateOverrides;
 };
 
 export type SimulationMetrics = {
@@ -54,6 +56,7 @@ const NIGHT_COOLING_BASE = 1.1;
 const MAX_HOURLY_TEMP_CHANGE = 7;
 const ABSOLUTE_MIN_TEMP = -70;
 const ABSOLUTE_MAX_TEMP = 65;
+const HUMIDITY_TARGET_RELAXATION = 0.25;
 
 export function calculateInversionLayer(
     state: SimulationState,
@@ -161,7 +164,8 @@ function calculatePhysicsRates(
     month: number,
     hour: number,
     enableInversions: boolean,
-    enableDownslope: boolean
+    enableDownslope: boolean,
+    climate: ClimateOverrides
 ): void {
     state.inversionAndDownslopeRate = Array(GRID_SIZE)
         .fill(null)
@@ -223,7 +227,7 @@ function calculatePhysicsRates(
                 const localWindSpeed = state.windVectorField[y][x].speed;
                 if (localWindSpeed > 5) {
                     const mixing = Math.min(WIND_MIXING_MAX, localWindSpeed / WIND_MIXING_DIVISOR);
-                    const baseTemp = calculateBaseTemperature(month, hour);
+                    const baseTemp = calculateBaseTemperature(month, hour, climate);
                     const mixingRate = (baseTemp - state.temperature[y][x]) * mixing;
                     state.inversionAndDownslopeRate[y][x] += mixingRate;
                 }
@@ -233,19 +237,37 @@ function calculatePhysicsRates(
 }
 
 export function updateThermodynamics(state: SimulationState, options: ThermodynamicsOptions): void {
-    const { month, hour, sunAltitude, timeFactor, enableDiffusion, enableInversions, enableDownslope } = options;
+    const {
+        month,
+        hour,
+        sunAltitude,
+        timeFactor,
+        enableDiffusion,
+        enableInversions,
+        enableDownslope,
+        climate: climateOverrides = DEFAULT_CLIMATE_OVERRIDES,
+    } = options;
 
-    calculatePhysicsRates(state, month, hour, enableInversions, enableDownslope);
+    calculatePhysicsRates(state, month, hour, enableInversions, enableDownslope, climateOverrides);
 
     let newTemperature: number[][] = state.temperature.map(row => [...row]);
     let newSoilTemperature: number[][] = state.soilTemperature.map(row => [...row]);
 
     if (timeFactor > 0) {
+        const humidityBlend = Math.min(Math.max(timeFactor * HUMIDITY_TARGET_RELAXATION, 0), 1);
+        const targetHumidity = clamp(climateOverrides.humidityTarget, 0.01, 1);
         for (let y = 0; y < GRID_SIZE; y++) {
             for (let x = 0; x < GRID_SIZE; x++) {
                 const prevAirTemp = state.temperature[y][x];
                 const prevSoilTemp = state.soilTemperature[y][x];
                 const thermalProps = getThermalProperties(state, x, y);
+                let cellHumidity = state.humidity[y][x];
+
+                if (humidityBlend > 0) {
+                    cellHumidity = blendHumidityTowardsTarget(cellHumidity, targetHumidity, humidityBlend);
+                    state.humidity[y][x] = cellHumidity;
+                    state.dewPoint[y][x] = computeDewPoint(prevAirTemp, cellHumidity);
+                }
 
                 let airEnergyBalance = 0;
                 let soilEnergyBalance = 0;
@@ -301,7 +323,7 @@ export function updateThermodynamics(state: SimulationState, options: Thermodyna
                     airEnergyBalance += latentEffect;
                 }
 
-                const humidity = clamp(state.humidity[y][x], 0, 1);
+                const humidity = clamp(cellHumidity, 0, 1);
                 const dewPoint = state.dewPoint[y][x];
                 const humidityOffset = (humidity - 0.5) * HUMIDITY_THERMAL_SENSITIVITY;
                 airEnergyBalance -= humidityOffset;

@@ -403,6 +403,44 @@ function bindControlSynchronizers(
         callbacks.runSimulationFrame();
         onStateUpdated();
     });
+    document.getElementById('seasonalIntensity')?.addEventListener('input', event => {
+        const value = Number.parseFloat((event.target as HTMLInputElement).value);
+        const label = document.getElementById('seasonalIntensityValue');
+        if (label) {
+            label.textContent = Number.isFinite(value) ? value.toFixed(0) : '100';
+        }
+        callbacks.runSimulationFrame();
+        onStateUpdated();
+    });
+    document.getElementById('seasonalShift')?.addEventListener('input', event => {
+        const value = Number.parseFloat((event.target as HTMLInputElement).value);
+        const label = document.getElementById('seasonalShiftValue');
+        if (label) {
+            const formatted = Number.isFinite(value) ? value.toFixed(2) : '0.00';
+            const trimmed = formatted.replace(/\.00$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+            label.textContent = value > 0 ? `+${trimmed}` : trimmed;
+        }
+        callbacks.runSimulationFrame();
+        onStateUpdated();
+    });
+    document.getElementById('baseTemperatureOffset')?.addEventListener('input', event => {
+        const value = Number.parseFloat((event.target as HTMLInputElement).value);
+        const label = document.getElementById('baseTemperatureOffsetValue');
+        if (label) {
+            label.textContent = Number.isFinite(value) ? value.toFixed(1) : '0.0';
+        }
+        callbacks.runSimulationFrame();
+        onStateUpdated();
+    });
+    document.getElementById('humidityTarget')?.addEventListener('input', event => {
+        const value = Number.parseFloat((event.target as HTMLInputElement).value);
+        const label = document.getElementById('humidityTargetValue');
+        if (label) {
+            label.textContent = Number.isFinite(value) ? value.toFixed(0) : '60';
+        }
+        callbacks.runSimulationFrame();
+        onStateUpdated();
+    });
     document.getElementById('windDirection')?.addEventListener('change', () => {
         callbacks.runSimulationFrame();
         onStateUpdated();

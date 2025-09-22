@@ -8,6 +8,7 @@ import {
   sampleMonthlyCycle,
   toMonthValue,
 } from '../shared/seasonal';
+import type { ClimateOverrides } from './climate';
 
 const arrayMin = (values: readonly number[]) =>
   values.reduce((min, value) => (value < min ? value : min), Number.POSITIVE_INFINITY);
@@ -18,6 +19,10 @@ const arrayMax = (values: readonly number[]) =>
 const MIN_DAYLIGHT_HOURS = arrayMin(MONTHLY_DAYLIGHT_HOURS);
 const MAX_DAYLIGHT_HOURS = arrayMax(MONTHLY_DAYLIGHT_HOURS);
 const MAX_DIURNAL_VARIATION = arrayMax(MONTHLY_DIURNAL_VARIATION);
+const ANNUAL_MEAN_TEMP =
+  MONTHLY_TEMPS.length > 0
+    ? MONTHLY_TEMPS.reduce((sum, value) => sum + value, 0) / MONTHLY_TEMPS.length
+    : 0;
 
 const EVENING_WARMTH_BASE = 0.12;
 const EVENING_WARMTH_RANGE = 0.05;
@@ -64,10 +69,15 @@ const smoothstep = (edge0: number, edge1: number, value: number) => {
   return t * t * (3 - 2 * t);
 };
 
-const computeTemperatureProfileParams = (daylightHours: number, diurnalRange: number) => {
+const computeTemperatureProfileParams = (
+  daylightHours: number,
+  diurnalRange: number,
+  maxDiurnalVariation: number,
+) => {
   const daylightFactor = normalizeSpan(daylightHours, MIN_DAYLIGHT_HOURS, MAX_DAYLIGHT_HOURS);
   const nightFactor = 1 - daylightFactor;
-  const diurnalFactor = normalizeSpan(diurnalRange, 0, MAX_DIURNAL_VARIATION);
+  const safeMaxDiurnal = Math.max(maxDiurnalVariation, 0.1);
+  const diurnalFactor = normalizeSpan(diurnalRange, 0, safeMaxDiurnal);
 
   const eveningWarmthFraction = clamp01(
     EVENING_WARMTH_BASE +
@@ -97,20 +107,45 @@ const computeTemperatureProfileParams = (daylightHours: number, diurnalRange: nu
   };
 };
 
-export function calculateBaseTemperature(month: number, hour: number): number {
+export function calculateBaseTemperature(
+  month: number,
+  hour: number,
+  overrides?: Partial<ClimateOverrides>,
+): number {
   const monthValue = toMonthValue(month);
+  const safeOverrides = overrides ?? {};
+  const seasonalIntensityRaw = safeOverrides.seasonalIntensity;
+  const baseTemperatureOffset = Number.isFinite(safeOverrides.baseTemperatureOffset)
+    ? (safeOverrides.baseTemperatureOffset as number)
+    : 0;
+  const seasonalShift = Number.isFinite(safeOverrides.seasonalShift)
+    ? (safeOverrides.seasonalShift as number)
+    : 0;
+  const safeSeasonalIntensity = Number.isFinite(seasonalIntensityRaw)
+    ? clamp(seasonalIntensityRaw as number, 0, 4)
+    : 1;
+
+  const shiftedMonthValue = monthValue + seasonalShift;
   const normalizedHour = normalizeHour(hour);
 
-  const averageTemp = sampleMonthlyCycle(monthValue - SEASONAL_LAG_MONTHS, MONTHLY_TEMPS);
-  const daylightHours = getDaylightHoursFromMonthValue(monthValue);
-  const diurnalRange = Math.max(0, sampleMonthlyCycle(monthValue, MONTHLY_DIURNAL_VARIATION));
+  const seasonalAverage = sampleMonthlyCycle(shiftedMonthValue - SEASONAL_LAG_MONTHS, MONTHLY_TEMPS);
+  const daylightHours = getDaylightHoursFromMonthValue(shiftedMonthValue);
+  const baseDiurnalRange = Math.max(0, sampleMonthlyCycle(shiftedMonthValue, MONTHLY_DIURNAL_VARIATION));
+
+  const averageTemp =
+    ANNUAL_MEAN_TEMP + (seasonalAverage - ANNUAL_MEAN_TEMP) * safeSeasonalIntensity + baseTemperatureOffset;
+  const diurnalRange = baseDiurnalRange * safeSeasonalIntensity;
 
   const {
     eveningWarmthFraction,
     preDawnWarmthFraction,
     preDawnWindowHours,
     nightCoolingExponent,
-  } = computeTemperatureProfileParams(daylightHours, diurnalRange);
+  } = computeTemperatureProfileParams(
+    daylightHours,
+    diurnalRange,
+    MAX_DIURNAL_VARIATION * Math.max(safeSeasonalIntensity, 1),
+  );
 
   const sunrise = 12 - daylightHours / 2;
   const sunset = 12 + daylightHours / 2;
