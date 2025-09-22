@@ -1,4 +1,4 @@
-import { GRID_SIZE } from './src/shared/constants';
+import { BASE_ELEVATION, GRID_SIZE, LAPSE_RATE } from './src/shared/constants';
 import {
     getDaylightHoursFromMonthValue,
     toMonthValue,
@@ -24,6 +24,7 @@ import {
     calculateSimulationMetrics,
     updateThermodynamics,
 } from './src/simulation/physics';
+import { calculateBaseTemperature } from './src/simulation/temperature';
 import {
     readSimulationControls,
     readVisualizationToggles,
@@ -113,7 +114,21 @@ function runSimulation(simDeltaTimeMinutes: number): void {
     }
 
     if (enableAdvection && timeFactor > 0) {
-        state.temperature = advectGrid(state.temperature, state.windVectorField, timeFactor);
+        const diurnalHour = Number.isFinite(timeOfDay) ? timeOfDay : currentHour;
+        const baseTemperature = calculateBaseTemperature(month, diurnalHour, climateOverrides);
+        const temperatureBaseline = state.elevation.map((row, y) =>
+            row.map(elev => {
+                const elevationDelta = (elev - BASE_ELEVATION) / 100;
+                return baseTemperature - elevationDelta * LAPSE_RATE;
+            })
+        );
+        const temperatureAnomaly = state.temperature.map((row, y) =>
+            row.map((value, x) => value - temperatureBaseline[y][x])
+        );
+        const advectedAnomaly = advectGrid(temperatureAnomaly, state.windVectorField, timeFactor);
+        state.temperature = temperatureBaseline.map((row, y) =>
+            row.map((baseline, x) => advectedAnomaly[y][x] + baseline)
+        );
         state.humidity = advectGrid(state.humidity, state.windVectorField, timeFactor);
         state.cloudWater = advectGrid(state.cloudWater, state.windVectorField, timeFactor);
     }
