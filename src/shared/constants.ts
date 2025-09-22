@@ -1,6 +1,6 @@
 import { LAND_TYPES, type LandType, SOIL_TYPES, type SoilType } from './types';
 
-export const GRID_SIZE = 200;
+export const GRID_SIZE = 100;
 export const CELL_SIZE = 6;
 export const BASE_ELEVATION = 100;
 export const LAPSE_RATE = 0.65; // °C per 100m

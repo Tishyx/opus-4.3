@@ -21,6 +21,34 @@ export type SimulationEventCallbacks = {
     seekToTimeOfDay: (targetMinutes: number) => void;
 };
 
+type GridCoordinates = { x: number; y: number };
+
+function getGridCoordinatesFromMouseEvent(
+    canvas: HTMLCanvasElement,
+    event: MouseEvent
+): GridCoordinates | null {
+    const rect = canvas.getBoundingClientRect();
+
+    if (rect.width === 0 || rect.height === 0) {
+        return null;
+    }
+
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const canvasX = (event.clientX - rect.left) * scaleX;
+    const canvasY = (event.clientY - rect.top) * scaleY;
+
+    if (!Number.isFinite(canvasX) || !Number.isFinite(canvasY)) {
+        return null;
+    }
+
+    return {
+        x: Math.floor(canvasX / CELL_SIZE),
+        y: Math.floor(canvasY / CELL_SIZE),
+    };
+}
+
 function toTitleCase(identifier: string): string {
     return identifier
         .toLowerCase()
@@ -605,12 +633,10 @@ export function setupEventListeners(
     canvas.addEventListener('mousedown', event => {
         state.isDrawing = true;
         state.isRightClick = event.button === 2;
-        const rect = canvas.getBoundingClientRect();
-        const gridX = Math.floor((event.clientX - rect.left) / CELL_SIZE);
-        const gridY = Math.floor((event.clientY - rect.top) / CELL_SIZE);
-        if (isInBounds(gridX, gridY)) {
-            updateSelectedCell(state, gridX, gridY, inspector);
-            handleBrush(state, gridX, gridY, callbacks, refreshSelectedCell);
+        const coordinates = getGridCoordinatesFromMouseEvent(canvas, event);
+        if (coordinates && isInBounds(coordinates.x, coordinates.y)) {
+            updateSelectedCell(state, coordinates.x, coordinates.y, inspector);
+            handleBrush(state, coordinates.x, coordinates.y, callbacks, refreshSelectedCell);
         }
         canvas.focus();
         event.preventDefault();
@@ -626,14 +652,12 @@ export function setupEventListeners(
     });
 
     canvas.addEventListener('mousemove', event => {
-        const rect = canvas.getBoundingClientRect();
-        const gridX = Math.floor((event.clientX - rect.left) / CELL_SIZE);
-        const gridY = Math.floor((event.clientY - rect.top) / CELL_SIZE);
+        const coordinates = getGridCoordinatesFromMouseEvent(canvas, event);
 
-        if (isInBounds(gridX, gridY)) {
-            showTooltip(tooltip, event, state, gridX, gridY);
+        if (coordinates && isInBounds(coordinates.x, coordinates.y)) {
+            showTooltip(tooltip, event, state, coordinates.x, coordinates.y);
             if (state.isDrawing) {
-                handleBrush(state, gridX, gridY, callbacks, refreshSelectedCell);
+                handleBrush(state, coordinates.x, coordinates.y, callbacks, refreshSelectedCell);
             }
         } else {
             hideTooltip(tooltip);
